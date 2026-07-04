@@ -1,0 +1,19 @@
+{
+  "name": "mediadot",
+  "version": "0.1.0",
+  "description": "미디어닷 — 멀티 플랫폼 콘텐츠 자동발행 & 광고수익 관리 시스템",
+  "main": "server/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server/index.js",
+    "seed": "node server/seed.js --demo"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "express": "^4.21.2",
+    "node-cron": "^3.0.3"
+  }
+}

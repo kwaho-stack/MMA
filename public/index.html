@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>미디어닷 — 콘텐츠 자동발행 &amp; 수익 관리</title>
+  <link rel="stylesheet" href="/css/app.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='%233987e5'/></svg>" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <div>
+          <div class="brand-name">미디어닷</div>
+          <div class="brand-sub">MEDIA PUBLISHING OS</div>
+        </div>
+      </div>
+      <nav id="nav">
+        <a href="#/" data-route="/"><span class="nav-ico">◧</span>대시보드</a>
+        <a href="#/studio" data-route="/studio"><span class="nav-ico">✎</span>콘텐츠 스튜디오</a>
+        <a href="#/queue" data-route="/queue"><span class="nav-ico">⇥</span>발행 큐 <span class="nav-badge" id="queue-badge"></span></a>
+        <a href="#/accounts" data-route="/accounts"><span class="nav-ico">▣</span>계정 · 매칭</a>
+        <a href="#/categories" data-route="/categories"><span class="nav-ico">◫</span>카테고리</a>
+        <a href="#/revenue" data-route="/revenue"><span class="nav-ico">₩</span>수익</a>
+        <a href="#/settings" data-route="/settings"><span class="nav-ico">⚙</span>설정</a>
+      </nav>
+      <div class="sidebar-foot">
+        <div id="mode-indicator"></div>
+      </div>
+    </aside>
+    <main class="main" id="view"></main>
+  </div>
+
+  <div id="toast-wrap"></div>
+  <div id="modal-root"></div>
+  <div id="chart-tooltip" class="chart-tooltip" hidden></div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/charts.js"></script>
+  <script src="/js/views/dashboard.js"></script>
+  <script src="/js/views/studio.js"></script>
+  <script src="/js/views/queue.js"></script>
+  <script src="/js/views/accounts.js"></script>
+  <script src="/js/views/categories.js"></script>
+  <script src="/js/views/revenue.js"></script>
+  <script src="/js/views/settings.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
