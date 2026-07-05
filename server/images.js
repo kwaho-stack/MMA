@@ -1,4 +1,4 @@
-// 이미지 엔진 — Google Gemini API로 본문 삽화를 생성한다.
+// 이미지 엔진 — Google Gemini로 본문 삽화를 생성한다. (API 키 또는 Google 계정 OAuth)
 // 리라이팅 원고의 [이미지: 장면 묘사] 마커를 찾아 마커당 1장을 생성하고,
 // 파일은 data/uploads/에 저장, 경로는 variant.extra.images에 기록된다.
 //   · 브라우저 발행(네이버·티스토리): 마커 위치에 파일을 직접 업로드
@@ -7,6 +7,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { getSetting } = require('./db');
+const gemini = require('./gemini');
 
 const UPLOAD_DIR = path.join(__dirname, '..', 'data', 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -15,11 +16,11 @@ if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const MARKER_RE = /\[(?:이미지|사진)\s*[::]\s*([^\]\n]{2,200})\]/g;
 
 function enabled() {
-  return getSetting('image_gen_enabled') === '1' && Boolean(getSetting('gemini_api_key'));
+  return getSetting('image_gen_enabled') === '1' && gemini.available();
 }
 
 function hasKey() {
-  return Boolean(getSetting('gemini_api_key'));
+  return gemini.available();
 }
 
 /**
@@ -28,8 +29,7 @@ function hasKey() {
  * @param {{aspect?: string, filename?: string}} opts
  */
 async function generateImage(prompt, { aspect = '16:9', filename = null } = {}) {
-  const key = getSetting('gemini_api_key');
-  if (!key) throw new Error('Gemini API 키가 등록되지 않았습니다. 설정에서 등록하세요.');
+  if (!gemini.available()) throw new Error('Gemini를 사용할 수 없습니다. 설정에서 Gemini API 키를 등록하거나 Google 계정을 연결하세요.');
   const model = getSetting('gemini_image_model') || 'gemini-2.5-flash-image';
 
   const styled = [
@@ -38,24 +38,13 @@ async function generateImage(prompt, { aspect = '16:9', filename = null } = {}) 
     '스타일: 밝고 현대적인 사진 또는 플랫 일러스트. 이미지 안에 글자·워터마크·로고를 넣지 마세요.',
   ].join('\n');
 
-  const call = async (withAspect) => {
-    const body = {
-      contents: [{ parts: [{ text: styled }] }],
-      generationConfig: {
-        responseModalities: ['TEXT', 'IMAGE'],
-        ...(withAspect ? { imageConfig: { aspectRatio: aspect } } : {}),
-      },
-    };
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
-    );
-    const text = await res.text();
-    let data;
-    try { data = JSON.parse(text); } catch { data = {}; }
-    if (!res.ok) throw new Error(`Gemini HTTP ${res.status} — ${data.error?.message || text.slice(0, 200)}`);
-    return data;
-  };
+  const call = (withAspect) => gemini.generateContent(model, {
+    contents: [{ parts: [{ text: styled }] }],
+    generationConfig: {
+      responseModalities: ['TEXT', 'IMAGE'],
+      ...(withAspect ? { imageConfig: { aspectRatio: aspect } } : {}),
+    },
+  });
 
   let data;
   try {

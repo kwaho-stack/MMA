@@ -1,11 +1,14 @@
-// LLM 콘텐츠 엔진 — Anthropic Claude API 또는 GitHub Copilot(구독 로그인).
+// LLM 콘텐츠 엔진 — Anthropic Claude API / GitHub Copilot(구독 로그인) / Google Gemini(키 또는 OAuth).
 // 설정의 llm_provider로 우선 엔진을 고르고, 해당 엔진이 준비되지 않았으면 다른 엔진으로 폴백한다.
-// 둘 다 없으면 템플릿 기반 데모 생성으로 폴백해 전체 파이프라인을 확인할 수 있다(데모 표시됨).
+// 모두 없으면 템플릿 기반 데모 생성으로 폴백해 전체 파이프라인을 확인할 수 있다(데모 표시됨).
 
 const Anthropic = require('@anthropic-ai/sdk');
 const { getSetting } = require('./db');
 const copilot = require('./copilot');
+const gemini = require('./gemini');
 const guidelines = require('./guidelines');
+
+const PROVIDER_ORDER = ['anthropic', 'copilot', 'google'];
 
 function getClient() {
   const key = getSetting('anthropic_api_key') || process.env.ANTHROPIC_API_KEY || '';
@@ -17,13 +20,18 @@ function model() {
   return getSetting('llm_model') || 'claude-opus-4-8';
 }
 
+function providerReady(p) {
+  if (p === 'anthropic') return Boolean(getSetting('anthropic_api_key') || process.env.ANTHROPIC_API_KEY);
+  if (p === 'copilot') return copilot.isConnected();
+  if (p === 'google') return gemini.available();
+  return false;
+}
+
 /** 사용 가능한 엔진 결정: 설정 우선순위 → 준비된 엔진 폴백 → null(데모) */
 function activeProvider() {
   const pref = getSetting('llm_provider') || 'anthropic';
-  const claudeReady = Boolean(getSetting('anthropic_api_key') || process.env.ANTHROPIC_API_KEY);
-  const copilotReady = copilot.isConnected();
-  if (pref === 'copilot') return copilotReady ? 'copilot' : (claudeReady ? 'anthropic' : null);
-  return claudeReady ? 'anthropic' : (copilotReady ? 'copilot' : null);
+  if (providerReady(pref)) return pref;
+  return PROVIDER_ORDER.find((p) => providerReady(p)) || null;
 }
 
 /** Copilot 응답에서 JSON 추출 — 코드펜스·앞뒤 잡음을 걷어낸다. */
@@ -48,6 +56,19 @@ async function jsonRequest({ system, prompt, schema, maxTokens = 16000 }) {
       maxTokens: Math.min(maxTokens, 8000),
     });
     return parseJSONLoose(raw);
+  }
+
+  if (provider === 'google') {
+    const gmodel = getSetting('google_text_model') || 'gemini-2.5-flash';
+    const data = await gemini.generateContent(gmodel, {
+      systemInstruction: { parts: [{ text: `${system}\n\n반드시 아래 스키마를 만족하는 JSON 객체 하나만 출력하세요.\n${JSON.stringify(schema)}` }] },
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: 'application/json', temperature: 0.7, maxOutputTokens: Math.min(maxTokens, 8192) },
+    });
+    if (data.candidates?.[0]?.finishReason === 'SAFETY') {
+      throw new Error('Gemini가 안전 정책으로 응답을 거절했습니다. 주제를 바꿔 다시 시도하세요.');
+    }
+    return parseJSONLoose(gemini.textOf(data) || '{}');
   }
 
   const client = getClient();
@@ -252,13 +273,10 @@ function hasApiKey() {
 /** 사이드바·설정 표시용 엔진 정보 */
 function engineInfo() {
   const provider = activeProvider();
-  return {
-    ready: provider !== null,
-    provider,
-    label: provider === 'copilot'
-      ? `Copilot (${getSetting('copilot_model') || 'gpt-4o'})`
-      : provider === 'anthropic' ? `Claude (${model()})` : '데모 모드',
-  };
+  const label = provider === 'copilot' ? `Copilot (${getSetting('copilot_model') || 'gpt-4o'})`
+    : provider === 'google' ? `Gemini (${getSetting('google_text_model') || 'gemini-2.5-flash'})`
+    : provider === 'anthropic' ? `Claude (${model()})` : '데모 모드';
+  return { ready: provider !== null, provider, label };
 }
 
 module.exports = { generateTopics, generateMaster, rewriteForPlatform, hasApiKey, engineInfo };

@@ -89,15 +89,30 @@ npm start        # http://localhost:3400
 
 ## AI 엔진
 
-**텍스트 (둘 중 하나만 있으면 동작, 설정에서 우선순위 선택):**
+**텍스트 (셋 중 하나만 있으면 동작, 설정에서 우선순위 선택 · 준비 안 된 엔진은 자동 폴백):**
 - **Claude API** — Anthropic API 키 등록 (`claude-opus-4-8` 기본). 환경변수 `ANTHROPIC_API_KEY`로도 설정 가능
-- **GitHub Copilot** — 설정에서 "GitHub로 로그인"(디바이스 코드 입력)하면 개인 Copilot 구독으로 원고 작성·리라이팅 수행. 모델은 구독 플랜에 따라 gpt-4o, gpt-4.1 등 선택. *개인 구독 계정에서만 사용하세요*
-- 둘 다 없으면 **데모 모드** — 자리표시 원고로 전체 파이프라인 흐름 확인 가능
+- **GitHub Copilot** — 설정에서 "GitHub로 로그인"(디바이스 코드 입력)하면 개인 Copilot 구독으로 원고 작성·리라이팅 수행. *개인 구독 계정에서만 사용하세요*
+- **Google Gemini** — Gemini API 키(AI Studio) 또는 **Google 계정 로그인**(아래)으로 `gemini-2.5-flash`/`pro` 사용
+- 모두 없으면 **데모 모드** — 자리표시 원고로 전체 파이프라인 흐름 확인 가능
 
 **이미지 (Gemini):**
-- **설정 → Gemini API 키** 등록(Google AI Studio에서 발급) 시 리라이팅 원고의 `[이미지: …]` 마커 위치에 삽화를 자동 생성 (`gemini-2.5-flash-image` 기본)
+- **Gemini API 키**(Google AI Studio 발급) 또는 **Google 계정 로그인**으로 리라이팅 원고의 `[이미지: …]` 마커 위치에 삽화를 자동 생성 (`gemini-2.5-flash-image` 기본)
 - 생성 파일은 `data/uploads/`에 저장 — 네이버·티스토리는 발행 시 파일 직접 업로드, 블로그스팟·워드프레스는 public_base_url 기준 `<img>` 태그 삽입
-- 설정 화면의 "이미지 생성 테스트" 버튼으로 키 동작을 즉시 확인
+- 설정 화면의 "이미지 생성 테스트" 버튼으로 동작을 즉시 확인
+
+### Google 계정 연결 (텍스트·이미지 공용 OAuth)
+
+API 키 대신 Google 계정 로그인으로 Gemini 텍스트·이미지를 함께 사용할 수 있습니다.
+1. Google Cloud Console → API 및 서비스 → 사용자 인증 정보 → **OAuth 클라이언트(유형: TV 및 입력 제한 기기)** 생성
+2. 사용 프로젝트에서 **Generative Language API** 사용 설정
+3. 설정 화면에 Client ID/Secret 입력 후 "Google로 로그인" → 표시된 코드를 Google 인증 페이지에 입력
+- refresh token은 서버에만 저장되며 화면·파일로 내보내지 않습니다. Gemini API 키가 있으면 키를 우선 사용하고, 없으면 이 연결로 대체됩니다.
+
+## 계정·매칭 백업 (내보내기 / 가져오기)
+
+계정 · 매칭 화면 상단의 **내보내기 / 가져오기**로 등록 내역을 JSON 파일로 저장·복원합니다.
+- **내보내기** — 미디어 계정·광고 계정·매칭·카테고리 연결을 파일로 저장. "자격증명 포함" 옵션으로 비밀번호·API 키·토큰까지 백업(평문이므로 안전 보관) 또는 계정 목록만 저장 선택
+- **가져오기** — 다른 기기/새 설치에서 파일로 복원. 같은 (플랫폼+이름) 계정은 중복 생성하지 않고 갱신(upsert), 카테고리는 이름으로 연결(없으면 생성), 매칭은 새 ID로 재매핑. "자격증명 덮어쓰기" 여부 선택 가능
 
 ## 시뮬레이션 → 실전 전환
 
@@ -116,9 +131,12 @@ server/
   db.js          node:sqlite 스키마·설정
   catalog.js     플랫폼 카탈로그 + 리라이팅 전략 프로파일(기본값)
   guidelines.js  지침 오버라이드 (기본 프로파일 위에 사용자 수정 적용)
-  llm.js         텍스트 엔진 (Claude API / GitHub Copilot, 구조화 출력)
+  llm.js         텍스트 엔진 (Claude API / GitHub Copilot / Google Gemini, 구조화 출력)
   copilot.js     GitHub Copilot 디바이스 플로우 로그인 + chat completions
+  google-oauth.js Google 계정 디바이스 플로우 로그인 (텍스트·이미지 공용)
+  gemini.js      Gemini 공용 호출 (API 키 또는 Google OAuth)
   images.js      Gemini 이미지 생성 + 본문 [이미지:…] 마커 처리
+  accounts-io.js 계정·매칭 내보내기/가져오기 (upsert 복원)
   cardnews.js    인스타 카드뉴스 렌더러 (Playwright HTML→1080×1080 PNG)
   browser.js     공용 Chromium 실행·로그인 세션 관리
   pipeline.js    자동발행 파이프라인 오케스트레이션 (원고→삽화→카드뉴스→배포)

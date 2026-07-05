@@ -92,10 +92,11 @@ async function viewSettings(el) {
       <div class="field">
         <label>우선 사용할 엔진</label>
         <select id="llm-provider">
-          <option value="anthropic" ${s.llm_provider !== 'copilot' ? 'selected' : ''}>Claude API (Anthropic 키)</option>
+          <option value="anthropic" ${s.llm_provider === 'anthropic' ? 'selected' : ''}>Claude API (Anthropic 키)</option>
           <option value="copilot" ${s.llm_provider === 'copilot' ? 'selected' : ''}>GitHub Copilot (구독 로그인)</option>
+          <option value="google" ${s.llm_provider === 'google' ? 'selected' : ''}>Google Gemini (API 키 또는 계정 로그인)</option>
         </select>
-        <div class="hint">선택한 엔진이 준비되지 않았으면 다른 엔진으로 자동 폴백, 둘 다 없으면 데모 모드로 동작합니다.</div>
+        <div class="hint">선택한 엔진이 준비되지 않았으면 다른 엔진으로 자동 폴백, 모두 없으면 데모 모드로 동작합니다.</div>
       </div>
       <div class="field">
         <label>Anthropic API 키 ${s.anthropic_api_key_set ? '<span class="badge badge-ok">연결됨</span>' : '<span class="badge badge-warn">미등록</span>'}</label>
@@ -125,11 +126,43 @@ async function viewSettings(el) {
     </div>
 
     <div class="card">
-      <div class="card-title">이미지 엔진 (Gemini) · 카드뉴스</div>
+      <div class="card-title">Google 계정 연결 <span style="font-weight:400; color:var(--muted)">텍스트(Gemini)·이미지 엔진 공용 — API 키 대신 계정 로그인</span></div>
+      <div class="field-row">
+        <div class="field">
+          <label>OAuth Client ID</label>
+          <input id="g-client-id" value="${esc(s.google_client_id)}" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label>OAuth Client Secret</label>
+          <input type="password" id="g-client-secret" value="${esc(s.google_client_secret)}" placeholder="GOCSPX-..." autocomplete="off" />
+        </div>
+      </div>
+      <div class="hint" style="margin-top:-8px; margin-bottom:12px;">
+        Google Cloud Console → API 및 서비스 → 사용자 인증 정보 → <b>OAuth 클라이언트(유형: TV 및 입력 제한 기기)</b>를 만들어 ID/시크릿을 입력하세요.
+        해당 프로젝트에 <b>Generative Language API</b>를 사용 설정해야 합니다. Client ID/Secret을 저장한 뒤 로그인하세요.
+      </div>
+      <div class="field-row" style="align-items:flex-end; margin-bottom:0;">
+        <div class="field" style="margin-bottom:0;">
+          <label>연결 상태 ${s.google?.connected ? `<span class="badge badge-ok">연결됨${s.google.user ? ` — ${esc(s.google.user)}` : ''}</span>` : '<span class="badge badge-warn">미연결</span>'}</label>
+          ${s.google?.connected
+            ? '<button class="btn btn-danger" id="google-logout" type="button">연결 해제</button>'
+            : '<button class="btn btn-primary" id="google-login" type="button">🔑 Google로 로그인</button>'}
+          <div class="hint">로그인하면 별도 API 키 없이 Gemini 텍스트·이미지를 사용합니다. 개인 계정 사용을 권장합니다.</div>
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Gemini 텍스트 모델</label>
+          <input id="g-text-model" value="${esc(s.google_text_model)}" placeholder="gemini-2.5-flash" />
+          <div class="hint">gemini-2.5-flash(빠름) · gemini-2.5-pro(고품질)</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">이미지 엔진 (Gemini) · 카드뉴스 <span style="font-weight:400; color:var(--muted)">${s.gemini_auth ? `현재 인증: ${esc(s.gemini_auth)}` : '인증 필요'}</span></div>
       <div class="field">
-        <label>Gemini API 키 ${s.gemini_api_key_set ? '<span class="badge badge-ok">연결됨</span>' : '<span class="badge badge-warn">미등록 — 삽화 생성 꺼짐</span>'}</label>
+        <label>Gemini API 키 ${s.gemini_api_key_set ? '<span class="badge badge-ok">연결됨</span>' : (s.google?.connected ? '<span class="badge badge-ok">Google 계정으로 사용 중</span>' : '<span class="badge badge-warn">미등록 — 삽화 생성 꺼짐</span>')}</label>
         <input type="password" id="gemini-key" value="${esc(s.gemini_api_key)}" placeholder="AIza..." autocomplete="off" />
-        <div class="hint">Google AI Studio(aistudio.google.com)에서 발급. 리라이팅 원고의 [이미지: …] 마커 위치에 삽화를 자동 생성해 발행 시 삽입합니다.</div>
+        <div class="hint">Google AI Studio(aistudio.google.com)에서 발급. <b>비워두면 위의 Google 계정 연결로 대체됩니다.</b> 리라이팅 원고의 [이미지: …] 마커 위치에 삽화를 자동 생성해 발행 시 삽입합니다.</div>
       </div>
       <div class="field-row">
         <div class="field" style="display:flex; align-items:center; gap:10px;">
@@ -193,6 +226,9 @@ async function viewSettings(el) {
         llm_model: el.querySelector('#model').value,
         llm_provider: el.querySelector('#llm-provider').value,
         copilot_model: el.querySelector('#copilot-model').value.trim() || 'gpt-4o',
+        google_client_id: el.querySelector('#g-client-id').value.trim(),
+        google_client_secret: el.querySelector('#g-client-secret').value.trim(),
+        google_text_model: el.querySelector('#g-text-model').value.trim() || 'gemini-2.5-flash',
         gemini_api_key: el.querySelector('#gemini-key').value.trim(),
         gemini_image_model: el.querySelector('#gemini-model').value.trim() || 'gemini-2.5-flash-image',
         image_gen_enabled: el.querySelector('#img-on').checked ? '1' : '0',
@@ -257,6 +293,66 @@ async function viewSettings(el) {
   if (logoutBtn) logoutBtn.addEventListener('click', async () => {
     if (!confirm('GitHub Copilot 연결을 해제할까요?')) return;
     await API.post('/api/copilot/logout');
+    toast('연결이 해제되었습니다.');
+    render();
+  });
+
+  // ---- Google 계정 디바이스 플로우 로그인 (텍스트·이미지 공용) ----
+  const gLoginBtn = el.querySelector('#google-login');
+  if (gLoginBtn) gLoginBtn.addEventListener('click', async () => {
+    const cid = el.querySelector('#g-client-id').value.trim();
+    const csec = el.querySelector('#g-client-secret').value.trim();
+    if (!cid) { toast('먼저 OAuth Client ID를 입력하세요.', 'bad'); return; }
+    gLoginBtn.disabled = true;
+    try {
+      // 로그인 전에 Client ID/Secret을 저장한다(서버가 설정값으로 디바이스 코드를 발급).
+      const patch = { google_client_id: cid };
+      if (csec && csec !== '********') patch.google_client_secret = csec;
+      await API.put('/api/settings', patch);
+
+      const d = await API.post('/api/google/device-start');
+      openModal({
+        title: 'Google 계정 로그인',
+        body: `
+          <p style="font-size:13px; color:var(--text-2); margin-bottom:14px;">아래 코드를 복사한 뒤 Google 인증 페이지에 입력하세요. 인증이 끝나면 자동으로 연결됩니다.</p>
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+            <code id="gg-code" style="font-size:26px; font-weight:800; letter-spacing:3px; padding:10px 18px; background:rgba(255,255,255,.05); border-radius:8px;">${esc(d.user_code)}</code>
+            <button class="btn btn-sm" id="gg-copy" type="button">복사</button>
+          </div>
+          <a class="btn btn-primary" href="${esc(d.verification_uri)}" target="_blank" rel="noopener">Google 인증 페이지 열기 ↗</a>
+          <div class="hint" style="margin-top:12px;" id="gg-status">인증 대기 중… (${Math.round(d.expires_in / 60)}분 안에 입력)</div>`,
+        footer: `<button class="btn" data-close>닫기</button>`,
+      });
+      document.getElementById('gg-copy').addEventListener('click', async () => {
+        await navigator.clipboard.writeText(d.user_code);
+        toast('코드가 복사되었습니다.', 'good');
+      });
+      const timer = setInterval(async () => {
+        if (!document.getElementById('gg-status')) { clearInterval(timer); return; }
+        try {
+          const r = await API.post('/api/google/device-poll', { device_code: d.device_code });
+          if (r.ok) {
+            clearInterval(timer);
+            closeModal();
+            toast(`Google 계정 연결 완료${r.user ? ` — ${r.user}` : ''}`, 'good');
+            render();
+          }
+        } catch (e) {
+          clearInterval(timer);
+          const st = document.getElementById('gg-status');
+          if (st) { st.textContent = `실패: ${e.message}`; st.style.color = 'var(--critical)'; }
+        }
+      }, (d.interval || 5) * 1000 + 500);
+    } catch (e) {
+      toast(e.message, 'bad');
+      gLoginBtn.disabled = false;
+    }
+  });
+
+  const gLogoutBtn = el.querySelector('#google-logout');
+  if (gLogoutBtn) gLogoutBtn.addEventListener('click', async () => {
+    if (!confirm('Google 계정 연결을 해제할까요?')) return;
+    await API.post('/api/google/logout');
     toast('연결이 해제되었습니다.');
     render();
   });

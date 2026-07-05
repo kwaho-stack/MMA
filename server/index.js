@@ -8,8 +8,11 @@ const { runPipeline, publishVariant } = require('./pipeline');
 const revenueSync = require('./revenue-sync');
 const scheduler = require('./scheduler');
 const copilot = require('./copilot');
+const googleOAuth = require('./google-oauth');
+const gemini = require('./gemini');
 const images = require('./images');
 const guidelines = require('./guidelines');
+const accountsIO = require('./accounts-io');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -218,6 +221,22 @@ app.delete('/api/ad-accounts/:id', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---------- 계정·매칭 내보내기 / 가져오기 ----------
+app.get('/api/accounts/export', wrap(async (req, res) => {
+  const includeCredentials = req.query.credentials !== '0';
+  const data = accountsIO.exportData({ includeCredentials });
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="mediadot-accounts-${stamp}.json"`);
+  res.send(JSON.stringify(data, null, 2));
+}));
+
+app.post('/api/accounts/import', wrap(async (req, res) => {
+  const { data, overwriteCredentials = true } = req.body || {};
+  const result = accountsIO.importData(data, { overwriteCredentials });
+  res.json(result);
+}));
+
 // ---------- 매칭 ----------
 app.post('/api/matchings', wrap(async (req, res) => {
   const { media_account_id, ad_account_id, note = '' } = req.body;
@@ -395,17 +414,23 @@ app.get('/api/settings', wrap(async (req, res) => {
   s.anthropic_api_key = s.anthropic_api_key ? '********' : '';
   s.gemini_api_key_set = Boolean(s.gemini_api_key);
   s.gemini_api_key = s.gemini_api_key ? '********' : '';
+  s.google_client_secret_set = Boolean(s.google_client_secret);
+  s.google_client_secret = s.google_client_secret ? '********' : '';
   delete s.github_copilot_token; // 토큰은 절대 내려보내지 않음
+  delete s.google_refresh_token; // refresh token도 절대 내려보내지 않음
   s.copilot = copilot.status();
+  s.google = googleOAuth.status();
+  s.gemini_auth = gemini.authLabel();
   s.engine = llm.engineInfo();
   res.json(s);
 }));
 
 app.put('/api/settings', wrap(async (req, res) => {
-  const allowed = Object.keys(DEFAULT_SETTINGS).filter((k) => k !== 'github_copilot_token');
+  const protectedKeys = ['github_copilot_token', 'google_refresh_token']; // 서버만 갱신
+  const allowed = Object.keys(DEFAULT_SETTINGS).filter((k) => !protectedKeys.includes(k));
   for (const [k, v] of Object.entries(req.body || {})) {
     if (!allowed.includes(k)) continue;
-    if ((k === 'anthropic_api_key' || k === 'gemini_api_key') && v === '********') continue; // 마스킹 값은 무시
+    if (['anthropic_api_key', 'gemini_api_key', 'google_client_secret'].includes(k) && v === '********') continue; // 마스킹 값은 무시
     setSetting(k, v);
   }
   log('system', '설정이 변경되었습니다.', req.body.publish_mode ? { publish_mode: req.body.publish_mode } : {});
@@ -428,6 +453,25 @@ app.post('/api/copilot/device-poll', wrap(async (req, res) => {
 app.post('/api/copilot/logout', wrap(async (req, res) => {
   copilot.logout();
   log('system', 'GitHub Copilot 연결이 해제되었습니다.');
+  res.json({ ok: true });
+}));
+
+// ---------- Google 계정 로그인 (디바이스 플로우 — 텍스트·이미지 공용) ----------
+app.get('/api/google/status', (req, res) => res.json(googleOAuth.status()));
+
+app.post('/api/google/device-start', wrap(async (req, res) => {
+  res.json(await googleOAuth.deviceStart());
+}));
+
+app.post('/api/google/device-poll', wrap(async (req, res) => {
+  const { device_code } = req.body || {};
+  if (!device_code) throw new Error('device_code가 필요합니다.');
+  res.json(await googleOAuth.devicePoll(device_code));
+}));
+
+app.post('/api/google/logout', wrap(async (req, res) => {
+  googleOAuth.logout();
+  log('system', 'Google 계정 연결이 해제되었습니다.');
   res.json({ ok: true });
 }));
 

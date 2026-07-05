@@ -17,6 +17,9 @@ async function viewAccounts(el) {
         <div class="page-desc">발행할 미디어 계정과 수익이 나오는 광고 플랫폼을 등록하고 서로 연결합니다</div>
       </div>
       <div style="display:flex; gap:8px;">
+        <button class="btn" id="export-accounts">⤓ 내보내기</button>
+        <button class="btn" id="import-accounts">⤒ 가져오기</button>
+        <input type="file" id="import-file" accept="application/json,.json" hidden />
         <button class="btn" id="add-ad">+ 광고 플랫폼</button>
         <button class="btn btn-primary" id="add-media">+ 미디어 계정</button>
       </div>
@@ -228,6 +231,79 @@ async function viewAccounts(el) {
   el.querySelectorAll('.edit-ad').forEach((b) => b.addEventListener('click', () => {
     adModal(ads.find((a) => a.id === Number(b.dataset.id)));
   }));
+
+  // ---- 내보내기 / 가져오기 ----
+  el.querySelector('#export-accounts').addEventListener('click', () => {
+    openModal({
+      title: '계정·매칭 내보내기',
+      body: `
+        <p style="font-size:12.5px; color:var(--text-2); margin-bottom:14px;">현재 등록된 미디어 계정 ${media.length}개, 광고 계정 ${ads.length}개와 매칭·카테고리 연결을 JSON 파일로 저장합니다.</p>
+        <div class="field" style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+          <label class="switch"><input type="checkbox" id="exp-creds" checked /><span class="track"></span></label>
+          <div><b style="font-size:13px;">자격증명 포함</b>
+          <div class="hint">비밀번호·API 키·토큰이 파일에 평문으로 담깁니다. 백업·기기 이전용으로만 안전하게 보관하세요. 끄면 계정 목록만 내보냅니다.</div></div>
+        </div>`,
+      footer: `<button class="btn" data-close>취소</button><button class="btn btn-primary" id="exp-go">내보내기</button>`,
+    });
+    document.getElementById('exp-go').addEventListener('click', async () => {
+      const withCreds = document.getElementById('exp-creds').checked;
+      try {
+        const data = await API.get(`/api/accounts/export?credentials=${withCreds ? '1' : '0'}`);
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `mediadot-accounts-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        closeModal();
+        toast(`내보내기 완료 — 미디어 ${data.counts.media} · 광고 ${data.counts.ad} · 매칭 ${data.counts.matchings}`, 'good');
+      } catch (e) { toast(e.message, 'bad'); }
+    });
+  });
+
+  const importFile = el.querySelector('#import-file');
+  el.querySelector('#import-accounts').addEventListener('click', () => importFile.click());
+  importFile.addEventListener('change', async () => {
+    const file = importFile.files[0];
+    if (!file) return;
+    let data;
+    try {
+      data = JSON.parse(await file.text());
+    } catch { toast('JSON 파일을 읽을 수 없습니다.', 'bad'); importFile.value = ''; return; }
+    if (data.type !== 'mediadot-accounts') { toast('미디어닷 계정 내보내기 파일이 아닙니다.', 'bad'); importFile.value = ''; return; }
+
+    const c = data.counts || {};
+    openModal({
+      title: '계정·매칭 가져오기',
+      body: `
+        <p style="font-size:12.5px; color:var(--text-2); margin-bottom:12px;">
+          파일: 미디어 ${c.media || 0}개 · 광고 ${c.ad || 0}개 · 매칭 ${c.matchings || 0}개
+          ${data.includes_credentials ? '<span class="badge badge-ok" style="margin-left:4px">자격증명 포함</span>' : '<span class="badge" style="margin-left:4px">자격증명 없음</span>'}
+        </p>
+        <p style="font-size:12px; color:var(--muted); margin-bottom:14px;">같은 플랫폼·이름의 계정이 이미 있으면 새로 만들지 않고 갱신합니다. 카테고리는 이름으로 연결(없으면 생성)됩니다.</p>
+        <div class="field" style="display:flex; align-items:center; gap:10px; margin-bottom:0;">
+          <label class="switch"><input type="checkbox" id="imp-over" ${data.includes_credentials ? 'checked' : ''} ${data.includes_credentials ? '' : 'disabled'} /><span class="track"></span></label>
+          <div><b style="font-size:13px;">기존 계정의 자격증명 덮어쓰기</b>
+          <div class="hint">끄면 이미 등록된 계정의 비밀번호·키는 그대로 두고 카테고리·매칭만 갱신합니다.</div></div>
+        </div>`,
+      footer: `<button class="btn" data-close>취소</button><button class="btn btn-primary" id="imp-go">가져오기</button>`,
+    });
+    const cleanup = () => { importFile.value = ''; };
+    document.querySelector('.modal-overlay').addEventListener('click', (ev) => {
+      if (ev.target.classList.contains('modal-overlay') || ev.target.hasAttribute('data-close')) cleanup();
+    });
+    document.getElementById('imp-go').addEventListener('click', async () => {
+      const overwriteCredentials = document.getElementById('imp-over').checked;
+      try {
+        const r = await API.post('/api/accounts/import', { data, overwriteCredentials });
+        closeModal(); cleanup();
+        const w = r.warnings && r.warnings.length ? ` (경고 ${r.warnings.length}건)` : '';
+        toast(`가져오기 완료 — 미디어 +${r.media.created}/갱신 ${r.media.updated}, 광고 +${r.ad.created}/갱신 ${r.ad.updated}, 매칭 +${r.matchings.created}${w}`, 'good');
+        render();
+      } catch (e) { toast(e.message, 'bad'); }
+    });
+  });
   el.querySelectorAll('.del-ad').forEach((b) => b.addEventListener('click', async () => {
     if (!confirm('이 광고 계정을 삭제할까요? 수익 기록도 함께 삭제됩니다.')) return;
     await API.del(`/api/ad-accounts/${b.dataset.id}`); toast('삭제되었습니다.'); render();

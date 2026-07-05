@@ -142,11 +142,16 @@ const DEFAULT_SETTINGS = {
   revenue_sync_time: '06:10',       // 동기화 실행 시각 (전일 데이터 확정 이후 새벽 권장)
   revenue_sync_days: '7',           // 매 동기화 시 가져올 최근 일수 (지연 확정 수치 보정용)
   usd_krw_rate: '1400',             // USD 정산 플랫폼(타불라 등) 원화 환산 환율
-  llm_provider: 'anthropic',        // 텍스트 엔진: 'anthropic'(Claude API) | 'copilot'(GitHub Copilot 구독)
+  llm_provider: 'anthropic',        // 텍스트 엔진: 'anthropic'(Claude API) | 'copilot'(Copilot 구독) | 'google'(Gemini)
   copilot_model: 'gpt-4o',          // Copilot 사용 시 모델 (구독 플랜에 따라 gpt-4.1, claude-sonnet-4 등)
   github_copilot_token: '',         // GitHub 디바이스 플로우로 발급된 OAuth 토큰
   github_copilot_user: '',          // 연결된 GitHub 계정명 (표시용)
-  gemini_api_key: '',               // 이미지 생성용 Google Gemini API 키
+  google_client_id: '',             // Google OAuth 클라이언트 ID (TV 및 입력 제한 기기)
+  google_client_secret: '',         // Google OAuth 클라이언트 시크릿
+  google_refresh_token: '',         // Google 디바이스 플로우로 발급된 refresh token
+  google_user: '',                  // 연결된 Google 계정 이메일 (표시용)
+  google_text_model: 'gemini-2.5-flash', // Google 텍스트 엔진 모델
+  gemini_api_key: '',               // Gemini API 키 (AI Studio) — Google 계정 연결 대신 사용 가능
   gemini_image_model: 'gemini-2.5-flash-image', // Gemini 이미지 생성 모델
   image_gen_enabled: '1',           // 블로그 본문 [이미지: …] 마커 위치에 삽화 자동 생성
   cardnews_enabled: '1',            // 인스타그램 변형을 카드뉴스 이미지로 자동 렌더링
