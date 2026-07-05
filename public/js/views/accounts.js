@@ -61,10 +61,20 @@ async function viewAccounts(el) {
       <div class="card-title">광고 플랫폼 계정 (${ads.length})</div>
       ${ads.length ? `
         <table class="tbl">
-          <thead><tr><th>플랫폼</th><th>계정</th><th>상태</th><th class="num">30일 수익</th><th>게재 미디어</th><th></th></tr></thead>
+          <thead><tr><th>플랫폼</th><th>계정</th><th>상태</th><th class="num">30일 수익</th><th>수익 연동</th><th>게재 미디어</th><th></th></tr></thead>
           <tbody>
             ${ads.map((a) => {
               const def = catalog.ad[a.platform] || {};
+              let syncCell;
+              if (!a.sync_available) {
+                syncCell = '<span class="badge" title="공식 리포트 API가 없는 플랫폼 — 수익 화면에서 수동 입력">수동 입력</span>';
+              } else if (a.sync_ready) {
+                syncCell = `<span class="badge badge-ok" title="${esc(def.sync?.api || '')}">자동 연동</span>
+                  ${a.last_sync_at ? `<div style="font-size:10.5px; color:var(--muted); margin-top:2px;">최근 ${fmt.datetime(a.last_sync_at)}</div>` : ''}
+                  ${a.sync_error ? `<div style="font-size:10.5px; color:var(--critical); margin-top:2px;" title="${esc(a.sync_error)}">최근 동기화 실패</div>` : ''}`;
+              } else {
+                syncCell = `<span class="badge badge-warn" title="${esc((def.sync?.guide || '') + ' 필요 항목: ' + (def.sync?.required || []).join(', '))}">연동 가능 — 키 필요</span>`;
+              }
               return `
                 <tr>
                   <td><span class="badge"><span class="bdot" style="background:${AD_COLORS[a.platform] || 'var(--s1)'}"></span>${esc(def.name || a.platform)}</span></td>
@@ -72,8 +82,10 @@ async function viewAccounts(el) {
                     <div style="font-size:11px; color:var(--muted); font-weight:400">${esc(def.payout || '')}</div></td>
                   <td>${a.status === 'active' ? '<span class="badge badge-ok">활성</span>' : a.status === 'pending' ? '<span class="badge badge-warn">심사 중</span>' : `<span class="badge">${esc(a.status)}</span>`}</td>
                   <td class="num" style="font-weight:600">${fmt.won(a.revenue30d)}</td>
+                  <td>${syncCell}</td>
                   <td>${a.matchings.length ? `${a.matchings.length}개 채널` : '<span style="color:var(--muted); font-size:12px">없음</span>'}</td>
                   <td style="text-align:right; white-space:nowrap">
+                    ${a.sync_available && a.sync_ready ? `<button class="btn btn-sm btn-good sync-ad" data-id="${a.id}">⟳ 동기화</button>` : ''}
                     <button class="btn btn-sm edit-ad" data-id="${a.id}">수정</button>
                     <button class="btn btn-sm btn-danger del-ad" data-id="${a.id}">✕</button>
                   </td>
@@ -214,6 +226,17 @@ async function viewAccounts(el) {
   el.querySelectorAll('.del-ad').forEach((b) => b.addEventListener('click', async () => {
     if (!confirm('이 광고 계정을 삭제할까요? 수익 기록도 함께 삭제됩니다.')) return;
     await API.del(`/api/ad-accounts/${b.dataset.id}`); toast('삭제되었습니다.'); render();
+  }));
+
+  el.querySelectorAll('.sync-ad').forEach((b) => b.addEventListener('click', async () => {
+    b.disabled = true; b.textContent = '동기화 중…';
+    try {
+      const r = await API.post(`/api/ad-accounts/${b.dataset.id}/sync`);
+      toast(`동기화 완료 — 최근 ${r.days}일 중 ${r.saved}일치, 합계 ${fmt.wonFull(r.total)}`, 'good');
+    } catch (e) {
+      toast(e.message, 'bad');
+    }
+    render();
   }));
 
   // ---- 매칭 ----

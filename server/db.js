@@ -115,6 +115,14 @@ CREATE TABLE IF NOT EXISTS activity_log (
 );
 `);
 
+// 스키마 마이그레이션 — 기존 DB에 새 컬럼을 추가한다(이미 있으면 무시).
+function ensureColumn(table, ddl) {
+  try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`); } catch { /* 이미 존재 */ }
+}
+ensureColumn('revenues', `source TEXT DEFAULT 'manual'`);      // 'manual' | 'sync'
+ensureColumn('ad_accounts', 'last_sync_at TEXT');
+ensureColumn('ad_accounts', `sync_error TEXT DEFAULT ''`);
+
 const DEFAULT_SETTINGS = {
   publish_mode: 'confirm',          // 'auto' = 예약시간에 자동 발행, 'confirm' = 사용자 최종 컨펌 후 발행
   schedule_enabled: '0',            // 정기 자동발행 파이프라인 on/off
@@ -124,6 +132,10 @@ const DEFAULT_SETTINGS = {
   simulate_publish: '1',            // 1 = 시뮬레이션 발행(외부 API 호출 안 함). 실계정 연동 후 0으로.
   llm_model: 'claude-opus-4-8',
   anthropic_api_key: '',
+  revenue_sync_enabled: '1',        // 매일 정해진 시각에 수익 자동 동기화
+  revenue_sync_time: '06:10',       // 동기화 실행 시각 (전일 데이터 확정 이후 새벽 권장)
+  revenue_sync_days: '7',           // 매 동기화 시 가져올 최근 일수 (지연 확정 수치 보정용)
+  usd_krw_rate: '1400',             // USD 정산 플랫폼(타불라 등) 원화 환산 환율
 };
 
 function getSetting(key) {

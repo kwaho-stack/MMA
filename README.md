@@ -58,6 +58,21 @@ npm start        # http://localhost:3400
 
 **광고(수익):** 구글 애드센스 · 네이버 애드포스트 · 카카오 애드핏 · 쿠팡 파트너스 · 타불라 · 데이블 · 텐핑(CPA) · 틱톡 크리에이터 리워드 · 유튜브 파트너
 
+## 수익 자동 동기화
+
+리포트 API를 제공하는 광고 플랫폼은 **계정 · 매칭**에서 자격증명을 등록하면 매일 지정 시각(기본 06:10)에 일별 수익이 자동 반영됩니다. 수익 화면의 "전체 동기화" 버튼으로 즉시 실행도 가능합니다.
+
+| 플랫폼 | 자동 연동 | 필요 자격증명 |
+|---|---|---|
+| 구글 애드센스 | ✅ AdSense Management API v2 | 게시자 ID + Google OAuth(client_id/secret/refresh_token, `adsense.readonly` 스코프) |
+| 쿠팡 파트너스 | ✅ Open API 커미션 리포트 | Access Key + Secret Key (파트너스 → 추가기능 → Open API) |
+| 타불라 | ✅ Backstage API | Client ID/Secret + Account ID (담당자 발급, USD → 설정 환율로 원화 환산) |
+| 유튜브 파트너 | ✅ YouTube Analytics API | Google OAuth (`yt-analytics-monetary.readonly` 스코프) |
+| 애드포스트 · 애드핏 · 틱톡 리워드 · 텐핑 | ❌ 공식 API 없음 | 정산 화면 값을 수익 화면에서 수동 기록 |
+
+- 동기화 행은 `자동` 출처로 저장되며 같은 날짜의 자동 기록만 갱신 — **수동 입력 기록은 보존**됩니다.
+- 확정치가 늦게 반영되는 플랫폼을 위해 매번 최근 N일(기본 7일)을 다시 덮어씁니다.
+
 ## AI 콘텐츠 엔진
 
 - **설정 → Anthropic API 키** 등록 시 Claude(`claude-opus-4-8` 기본)가 주제 발굴·마스터 원고 작성·플랫폼별 리라이팅을 수행합니다. 환경변수 `ANTHROPIC_API_KEY`로도 설정 가능.
@@ -82,7 +97,8 @@ server/
   llm.js         Claude 연동 (주제·원고·리라이팅, 구조화 출력)
   pipeline.js    자동발행 파이프라인 오케스트레이션
   policy.js      광고 정책 리스크 검사
-  scheduler.js   node-cron: 예약 발행 + 정기 자동발행
+  revenue-sync.js 수익 자동 동기화 (애드센스·쿠팡·타불라·유튜브 리포트 API)
+  scheduler.js   node-cron: 예약 발행 + 정기 자동발행 + 일일 수익 동기화
   adapters/      플랫폼별 발행 어댑터 (API/수동/시뮬레이션)
   seed.js        데모 데이터
 public/          다크 테마 SPA (vanilla JS + SVG 차트)

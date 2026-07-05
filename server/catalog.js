@@ -205,7 +205,17 @@ const AD_PLATFORMS = {
     attach: ['blogger', 'tistory', 'wordpress'],
     payout: 'CPC/CPM',
     note: '블로그 수익의 중심. 승인까지 양질의 글 15~20개 필요. 정책 위반(의료·금융 과장, 성인 등) 시 게재 제한 → 정책 검사 필수.',
-    credentialFields: [{ key: 'publisher_id', label: '게시자 ID (pub-...)', required: false }],
+    sync: {
+      api: 'AdSense Management API v2',
+      required: ['publisher_id', 'client_id', 'client_secret', 'refresh_token'],
+      guide: 'Google Cloud Console에서 OAuth 클라이언트 생성 → adsense.readonly 스코프로 refresh token 발급.',
+    },
+    credentialFields: [
+      { key: 'publisher_id', label: '게시자 ID (pub-...)', required: false },
+      { key: 'client_id', label: 'Google OAuth Client ID', required: false },
+      { key: 'client_secret', label: 'Google OAuth Client Secret', required: false, secret: true },
+      { key: 'refresh_token', label: 'Refresh Token', required: false, secret: true },
+    ],
   },
   adpost: {
     name: '네이버 애드포스트',
@@ -226,6 +236,11 @@ const AD_PLATFORMS = {
     attach: ['blogger', 'naver_blog', 'tistory', 'wordpress', 'instagram', 'facebook', 'threads', 'x_twitter'],
     payout: '판매 수수료 3%',
     note: '가입 즉시 링크 생성 가능. 상품 연관 콘텐츠(생활정보·리뷰)와 궁합이 좋음. 대가성 문구 표기 의무.',
+    sync: {
+      api: '쿠팡 파트너스 Open API (커미션 리포트)',
+      required: ['access_key', 'secret_key'],
+      guide: '파트너스 → 추가기능 → Open API에서 Access/Secret Key 발급.',
+    },
     credentialFields: [
       { key: 'access_key', label: 'Access Key', required: false, secret: true },
       { key: 'secret_key', label: 'Secret Key', required: false, secret: true },
@@ -236,7 +251,17 @@ const AD_PLATFORMS = {
     attach: ['blogger', 'wordpress'],
     payout: 'CPC (네이티브 광고)',
     note: '월 50만 PV 내외 트래픽 필요. 애드센스와 병행해 블로그 하단 추가 수익.',
-    credentialFields: [{ key: 'publisher_name', label: 'Publisher 명', required: false }],
+    sync: {
+      api: 'Taboola Backstage API (revenue-summary)',
+      required: ['client_id', 'client_secret', 'account_id'],
+      guide: '타불라 담당자에게 Backstage API 자격증명 요청. USD 정산 → 설정의 환율로 원화 환산 저장.',
+    },
+    credentialFields: [
+      { key: 'publisher_name', label: 'Publisher 명', required: false },
+      { key: 'account_id', label: 'Account ID', required: false },
+      { key: 'client_id', label: 'API Client ID', required: false },
+      { key: 'client_secret', label: 'API Client Secret', required: false, secret: true },
+    ],
   },
   dable: {
     name: '데이블(Dable)',
@@ -257,7 +282,16 @@ const AD_PLATFORMS = {
     attach: ['youtube'],
     payout: '광고 수익 배분 (쇼츠 RPM)',
     note: '구독 1,000명 + 쇼츠 조회 1,000만(90일) 또는 시청 4,000시간 필요.',
-    credentialFields: [],
+    sync: {
+      api: 'YouTube Analytics API (estimatedRevenue)',
+      required: ['client_id', 'client_secret', 'refresh_token'],
+      guide: 'Google Cloud Console에서 OAuth 클라이언트 생성 → yt-analytics-monetary.readonly 스코프로 refresh token 발급.',
+    },
+    credentialFields: [
+      { key: 'client_id', label: 'Google OAuth Client ID', required: false },
+      { key: 'client_secret', label: 'Google OAuth Client Secret', required: false, secret: true },
+      { key: 'refresh_token', label: 'Refresh Token', required: false, secret: true },
+    ],
   },
   tenping: {
     name: '텐핑(CPA)',

@@ -14,9 +14,12 @@ async function viewRevenue(el) {
     <div class="page-head">
       <div>
         <div class="page-title">수익</div>
-        <div class="page-desc">광고 플랫폼별 수익을 기록하고 추이를 확인합니다 (수동 입력 · API 연동 준비)</div>
+        <div class="page-desc">광고 플랫폼별 수익을 자동 동기화하거나 수동으로 기록합니다</div>
       </div>
-      <button class="btn btn-primary" id="add-rev">+ 수익 기록</button>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-good" id="sync-all">⟳ 전체 동기화</button>
+        <button class="btn btn-primary" id="add-rev">+ 수익 기록</button>
+      </div>
     </div>
 
     <div class="grid grid-3">
@@ -51,12 +54,13 @@ async function viewRevenue(el) {
       <div class="card-title">최근 수익 기록</div>
       ${data.recent.length ? `
         <table class="tbl">
-          <thead><tr><th>날짜</th><th>광고 플랫폼</th><th>미디어</th><th class="num">금액</th><th>메모</th><th></th></tr></thead>
+          <thead><tr><th>날짜</th><th>광고 플랫폼</th><th>출처</th><th>미디어</th><th class="num">금액</th><th>메모</th><th></th></tr></thead>
           <tbody>
             ${data.recent.map((r) => `
               <tr>
                 <td style="font-variant-numeric:tabular-nums">${esc(r.date)}</td>
                 <td><span class="badge"><span class="bdot" style="background:${AD_COLORS[r.ad_platform] || 'var(--s1)'}"></span>${esc(r.ad_name)}</span></td>
+                <td>${r.source === 'sync' ? '<span class="badge badge-ok">자동</span>' : '<span class="badge">수동</span>'}</td>
                 <td style="color:var(--muted); font-size:12px">${esc(r.media_name || '전체')}</td>
                 <td class="num" style="font-weight:600">${fmt.wonFull(r.amount)}</td>
                 <td style="color:var(--muted); font-size:12px">${esc(r.memo || '')}</td>
@@ -67,8 +71,10 @@ async function viewRevenue(el) {
     </div>
 
     <div class="help-note" style="margin-top:16px;">
-      <b>수익 데이터 연동</b> — 애드센스·애드포스트 등은 정산 리포트 CSV/화면 값을 이 화면에서 날짜별로 기록하면 대시보드에 반영됩니다.
-      플랫폼별 리포팅 API 연동(애드센스 Management API 등)은 자격증명 등록 후 확장할 수 있는 구조로 설계되어 있습니다.
+      <b>수익 자동 동기화</b> — 애드센스·쿠팡 파트너스·타불라·유튜브는 <a href="#/accounts" style="color:#9ec5f4">계정 · 매칭</a>에서 API 자격증명을 등록하면
+      매일 지정 시각(설정)에 자동으로 수익이 반영되고, 위 "전체 동기화" 버튼으로 즉시 가져올 수도 있습니다.
+      네이버 애드포스트·카카오 애드핏·틱톡 리워드·텐핑은 공식 리포트 API가 없어 정산 화면 값을 수동 기록해야 합니다.
+      자동 동기화는 같은 날짜의 자동 기록만 갱신하며 수동 입력 기록은 보존합니다.
     </div>
   `;
 
@@ -123,4 +129,21 @@ async function viewRevenue(el) {
   el.querySelectorAll('.del-rev').forEach((b) => b.addEventListener('click', async () => {
     await API.del(`/api/revenues/${b.dataset.id}`); render();
   }));
+
+  el.querySelector('#sync-all').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true; btn.textContent = '동기화 중…';
+    try {
+      const { results } = await API.post('/api/revenues/sync-all');
+      if (!results.length) {
+        toast('자동 동기화 가능한 광고 계정이 없습니다. 계정 · 매칭에서 애드센스/쿠팡/타불라/유튜브 자격증명을 등록하세요.', 'info');
+      } else {
+        const ok = results.filter((r) => r.ok);
+        const fail = results.filter((r) => !r.ok);
+        if (ok.length) toast(`동기화 성공 ${ok.length}건 — ${ok.map((r) => r.name).join(', ')}`, 'good');
+        for (const f of fail) toast(f.error, 'bad');
+      }
+    } catch (err) { toast(err.message, 'bad'); }
+    render();
+  });
 }

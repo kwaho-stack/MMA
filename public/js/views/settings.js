@@ -62,6 +62,32 @@ async function viewSettings(el) {
     </div>
 
     <div class="card">
+      <div class="card-title">수익 자동 동기화 <span style="font-weight:400; color:var(--muted)">애드센스 · 쿠팡 파트너스 · 타불라 · 유튜브</span></div>
+      <div class="field" style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
+        <label class="switch"><input type="checkbox" id="rs-on" ${s.revenue_sync_enabled === '1' ? 'checked' : ''} /><span class="track"></span></label>
+        <div><b style="font-size:13px;">매일 자동으로 수익 가져오기</b>
+        <div class="hint">계정 · 매칭에 API 자격증명이 등록된 광고 계정의 일별 수익을 자동 반영합니다. 애드포스트·애드핏 등 API 미제공 플랫폼은 수동 입력.</div></div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>동기화 시각 (HH:MM)</label>
+          <input id="rs-time" value="${esc(s.revenue_sync_time)}" placeholder="06:10" />
+          <div class="hint">전일 수치가 확정되는 새벽 시간대 권장</div>
+        </div>
+        <div class="field">
+          <label>가져올 최근 일수</label>
+          <input type="number" id="rs-days" value="${esc(s.revenue_sync_days)}" min="1" max="30" />
+          <div class="hint">플랫폼이 확정치를 늦게 반영하는 경우를 대비해 매번 며칠치를 다시 덮어씁니다</div>
+        </div>
+        <div class="field">
+          <label>USD→KRW 환율</label>
+          <input type="number" id="rs-rate" value="${esc(s.usd_krw_rate)}" min="1" />
+          <div class="hint">타불라 등 달러 정산 플랫폼의 원화 환산에 사용</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="card-title">AI 콘텐츠 엔진 (Claude)</div>
       <div class="field">
         <label>Anthropic API 키 ${s.anthropic_api_key_set ? '<span class="badge badge-ok">연결됨</span>' : '<span class="badge badge-warn">미등록 — 데모 모드</span>'}</label>
@@ -103,6 +129,10 @@ async function viewSettings(el) {
         simulate_publish: el.querySelector('#sim').checked ? '1' : '0',
         anthropic_api_key: el.querySelector('#api-key').value.trim(),
         llm_model: el.querySelector('#model').value,
+        revenue_sync_enabled: el.querySelector('#rs-on').checked ? '1' : '0',
+        revenue_sync_time: el.querySelector('#rs-time').value.trim(),
+        revenue_sync_days: el.querySelector('#rs-days').value,
+        usd_krw_rate: el.querySelector('#rs-rate').value,
       });
       toast('설정이 저장되었습니다.', 'good');
       render();

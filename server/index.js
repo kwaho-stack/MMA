@@ -5,6 +5,7 @@ const { MEDIA_PLATFORMS, AD_PLATFORMS } = require('./catalog');
 const seed = require('./seed');
 const llm = require('./llm');
 const { runPipeline, publishVariant } = require('./pipeline');
+const revenueSync = require('./revenue-sync');
 const scheduler = require('./scheduler');
 
 const app = express();
@@ -171,8 +172,22 @@ app.get('/api/ad-accounts', wrap(async (req, res) => {
     r.credentials = JSON.parse(r.credentials || '{}');
     r.matchings = matches.filter((m) => m.ad_account_id === r.id);
     r.revenue30d = rev.find((x) => x.ad_account_id === r.id)?.amount || 0;
+    const def = AD_PLATFORMS[r.platform];
+    r.sync_available = Boolean(def && def.sync);
+    r.sync_ready = Boolean(def && def.sync && def.sync.required.every((k) => r.credentials[k]));
   }
   res.json(rows);
+}));
+
+// ---------- 수익 자동 동기화 ----------
+app.post('/api/ad-accounts/:id/sync', wrap(async (req, res) => {
+  const result = await revenueSync.syncAdAccount(Number(req.params.id), req.body?.days || null);
+  res.json(result);
+}));
+
+app.post('/api/revenues/sync-all', wrap(async (req, res) => {
+  const results = await revenueSync.syncAll(req.body?.days || null);
+  res.json({ results });
 }));
 
 app.post('/api/ad-accounts', wrap(async (req, res) => {
