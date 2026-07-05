@@ -273,6 +273,16 @@ function renderVariantCard(v, { showContent = false } = {}) {
       </div>
       <div class="variant-title">${esc(v.title)}</div>
       ${v.body ? `<div class="variant-body">${esc(v.body)}</div>` : ''}
+      ${(extra.cards || []).length ? `
+        <div style="display:flex; gap:6px; margin-top:8px; overflow-x:auto; padding-bottom:4px;">
+          ${extra.cards.map((c, i) => `<a href="${esc(c)}" target="_blank" rel="noopener" title="카드 ${i + 1} — 클릭해 원본 보기(다운로드해 수동 업로드 가능)"><img src="${esc(c)}" alt="카드 ${i + 1}" style="width:72px; height:72px; border-radius:6px; border:1px solid rgba(255,255,255,.08); object-fit:cover;" loading="lazy" /></a>`).join('')}
+          <span style="font-size:11px; color:var(--muted); align-self:center; white-space:nowrap;">카드뉴스 ${extra.cards.length}장</span>
+        </div>` : ''}
+      ${(extra.images || []).length ? `
+        <div style="display:flex; gap:6px; margin-top:8px; overflow-x:auto; padding-bottom:4px;">
+          ${extra.images.map((im) => `<a href="${esc(im.file)}" target="_blank" rel="noopener" title="${esc(im.prompt)}"><img src="${esc(im.file)}" alt="${esc(im.prompt)}" style="width:96px; height:54px; border-radius:6px; border:1px solid rgba(255,255,255,.08); object-fit:cover;" loading="lazy" /></a>`).join('')}
+          <span style="font-size:11px; color:var(--muted); align-self:center; white-space:nowrap;">본문 삽화 ${extra.images.length}장 — 발행 시 마커 위치에 삽입</span>
+        </div>` : ''}
       ${v.error ? `<div style="color:var(--critical); font-size:12px; margin-top:6px;">✕ ${esc(v.error)}</div>` : ''}
       <div class="variant-actions">
         ${v.body ? `<button class="btn btn-sm act-expand">전체 보기</button>` : ''}

@@ -1,0 +1,169 @@
+// 네이버 블로그 브라우저 자동 발행 — 공식 발행 API가 없어 Playwright로 스마트에디터 ONE을 직접 조작한다.
+// 로그인 세션은 data/sessions/에 저장되어 재사용된다(매번 로그인하지 않음 → 보호조치 회피가 아니라 자연스러운 이용 패턴).
+//
+// 흐름: 로그인 확인 → 글쓰기 진입(iframe mainFrame) → 제목 입력 → 본문 문단 입력
+//       → [이미지: …] 마커 위치에 생성 이미지 파일 업로드 → 발행 버튼 → 게시 URL 회수
+// 캡차·2단계 인증이 뜨면 자동화를 중단하고 명확한 안내와 함께 수동 발행으로 전환된다.
+
+const { withAccountPage, clickFirst } = require('../browser');
+const images = require('../images');
+
+function credsOf(account) {
+  try { return JSON.parse(account.credentials || '{}'); } catch { return {}; }
+}
+
+async function isLoggedIn(page) {
+  await page.goto('https://www.naver.com', { waitUntil: 'domcontentloaded' });
+  return page.evaluate(() => document.cookie.includes('NID_AUT'));
+}
+
+async function login(page, creds) {
+  await page.goto('https://nid.naver.com/nidlogin.login?mode=form', { waitUntil: 'domcontentloaded' });
+  // 입력값을 JS로 주입 — 오타·IME 문제 없이 안정적으로 입력된다.
+  await page.evaluate(({ id, pw }) => {
+    const set = (sel, v) => {
+      const el = document.querySelector(sel);
+      if (!el) return;
+      el.value = v;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    set('#id', id);
+    set('#pw', pw);
+  }, { id: creds.naver_id, pw: creds.naver_pw });
+  await clickFirst(page, ['#log\\.login', 'button[type=submit]', '.btn_login']);
+  await page.waitForLoadState('domcontentloaded');
+  await page.waitForTimeout(1500);
+
+  const url = page.url();
+  // 새 기기 등록 화면 → "등록안함"
+  if (url.includes('deviceConfirm')) {
+    await clickFirst(page, ['#new\\.dontsave', 'a:has-text("등록안함")', 'span:has-text("등록안함")'], { optional: true });
+    await page.waitForTimeout(1200);
+  }
+  if (page.url().includes('nidlogin')) {
+    const captcha = await page.locator('#captcha, .captcha_wrap, img[alt*="캡차"]').count();
+    if (captcha) {
+      throw new Error('네이버가 자동입력 방지(캡차)를 요구합니다. PC 브라우저에서 이 계정으로 한 번 로그인한 뒤 다시 시도하거나, 잠시 후 재시도하세요.');
+    }
+    const msg = await page.locator('.error_message, #err_common').first().textContent().catch(() => '');
+    throw new Error(`네이버 로그인 실패${msg ? ` — ${msg.trim()}` : ''}. 아이디/비밀번호를 확인하세요.`);
+  }
+}
+
+/** 에디터 프레임 확보 — 글쓰기 페이지의 mainFrame 안에 스마트에디터가 뜬다. */
+async function editorFrame(page) {
+  for (let i = 0; i < 20; i++) {
+    for (const f of page.frames()) {
+      try {
+        if (await f.locator('.se-container, .se-title-text').count()) return f;
+      } catch { /* 프레임 교체 중 */ }
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error('네이버 에디터 로딩에 실패했습니다.');
+}
+
+async function insertImage(page, frame, filePath) {
+  const chooser = page.waitForEvent('filechooser', { timeout: 8000 });
+  await clickFirst(frame, [
+    'button[data-name="image"]',
+    '.se-image-toolbar-button',
+    'button[data-log="dot.img"]',
+    'button:has-text("사진")',
+  ]);
+  const fc = await chooser;
+  await fc.setFiles(filePath);
+  await page.waitForTimeout(2500); // 업로드 완료 대기
+  // 업로드 후 커서를 본문 끝으로
+  await frame.locator('.se-component.se-text .se-text-paragraph').last().click({ timeout: 3000 }).catch(() => {});
+}
+
+/**
+ * 발행 실행.
+ * @returns {Promise<{url: string}>}
+ */
+async function publish(account, variant) {
+  const creds = credsOf(account);
+  if (!creds.naver_id || !creds.naver_pw) {
+    throw new Error('네이버 아이디/비밀번호가 등록되지 않았습니다. 계정 · 매칭에서 등록하세요.');
+  }
+  const extra = (() => { try { return JSON.parse(variant.extra || '{}'); } catch { return {}; } })();
+  const imgList = (extra.images || []).map((im) => ({ ...im, local: images.localPathOf(im.file) })).filter((im) => im.local);
+
+  return withAccountPage(account, async (page) => {
+    if (!(await isLoggedIn(page))) await login(page, creds);
+
+    // 글쓰기 진입
+    await page.goto(`https://blog.naver.com/${encodeURIComponent(creds.naver_id)}?Redirect=Write&`, { waitUntil: 'domcontentloaded' });
+    const frame = await editorFrame(page);
+
+    // "작성 중이던 글" 팝업·도움말 패널 정리
+    await clickFirst(frame, ['.se-popup-button-cancel', 'button:has-text("취소")'], { optional: true, timeout: 2500 });
+    await clickFirst(frame, ['.se-help-panel-close-button', 'button[aria-label="닫기"]'], { optional: true, timeout: 1500 });
+
+    // 제목
+    await frame.locator('.se-section-documentTitle, .se-title-text').first().click();
+    await frame.locator('body').press('Control+a').catch(() => {});
+    await page.keyboard.type(variant.title, { delay: 12 });
+
+    // 본문 — 마커 단위로 나눠 문단 입력 + 이미지 업로드
+    await frame.locator('.se-component.se-text .se-text-paragraph').first().click();
+    const segments = String(variant.body || '').split(images.MARKER_RE);
+    // split 결과: [텍스트, 마커설명, 텍스트, 마커설명, …]
+    let imgIdx = 0;
+    for (let i = 0; i < segments.length; i++) {
+      const isMarkerDesc = i % 2 === 1;
+      if (isMarkerDesc) {
+        const im = imgList[imgIdx++];
+        if (im) {
+          try { await insertImage(page, frame, im.local); }
+          catch { /* 이미지 1장 실패는 본문 발행을 막지 않는다 */ }
+        }
+        continue;
+      }
+      const text = segments[i].trim();
+      if (!text) continue;
+      for (const line of text.split('\n')) {
+        if (line.trim()) await page.keyboard.type(line, { delay: 4 });
+        await page.keyboard.press('Enter');
+      }
+    }
+
+    // 태그 입력은 발행 레이어에서 — 발행 버튼(1차)
+    await clickFirst(frame, [
+      'button[data-testid="seOnePublishBtn"]',
+      '.publish_btn__apDcM',
+      'button:has-text("발행")',
+    ]);
+    await page.waitForTimeout(1000);
+
+    // 태그 (해시태그 앞 5개)
+    const tags = (extra.hashtags || []).slice(0, 5);
+    if (tags.length) {
+      const tagInput = frame.locator('#tag-input, input[placeholder*="태그"]').first();
+      if (await tagInput.count()) {
+        for (const t of tags) {
+          await tagInput.fill(String(t).replace(/^#/, ''));
+          await page.keyboard.press('Enter');
+        }
+      }
+    }
+
+    // 발행 확정(2차)
+    await clickFirst(frame, [
+      'button[data-testid="seOnePublishConfirmBtn"]',
+      '.confirm_btn__WEaBq',
+      'button:has-text("발행")',
+    ]);
+
+    // 게시 완료 → PostView로 이동
+    await page.waitForURL(/blog\.naver\.com\/.+\/\d+|PostView/, { timeout: 30000 }).catch(() => {});
+    const url = page.url().includes('blog.naver.com') && /\d{6,}/.test(page.url())
+      ? page.url()
+      : `https://blog.naver.com/${creds.naver_id}`;
+    return { url };
+  });
+}
+
+module.exports = { publish };

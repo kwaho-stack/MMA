@@ -7,10 +7,15 @@ const llm = require('./llm');
 const { runPipeline, publishVariant } = require('./pipeline');
 const revenueSync = require('./revenue-sync');
 const scheduler = require('./scheduler');
+const copilot = require('./copilot');
+const images = require('./images');
+const guidelines = require('./guidelines');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
+// 생성된 삽화·카드뉴스 이미지 (data/uploads)
+app.use('/uploads', express.static(path.join(__dirname, '..', 'data', 'uploads')));
 
 const wrap = (fn) => (req, res) => {
   Promise.resolve(fn(req, res)).catch((e) => {
@@ -83,6 +88,7 @@ app.get('/api/dashboard', wrap(async (req, res) => {
       schedule_enabled: getSetting('schedule_enabled'),
       simulate_publish: getSetting('simulate_publish'),
       llm_ready: llm.hasApiKey(),
+      llm_label: llm.engineInfo().label,
     },
   });
 }));
@@ -387,17 +393,65 @@ app.get('/api/settings', wrap(async (req, res) => {
   const s = getAllSettings();
   s.anthropic_api_key_set = Boolean(s.anthropic_api_key || process.env.ANTHROPIC_API_KEY);
   s.anthropic_api_key = s.anthropic_api_key ? '********' : '';
+  s.gemini_api_key_set = Boolean(s.gemini_api_key);
+  s.gemini_api_key = s.gemini_api_key ? '********' : '';
+  delete s.github_copilot_token; // 토큰은 절대 내려보내지 않음
+  s.copilot = copilot.status();
+  s.engine = llm.engineInfo();
   res.json(s);
 }));
 
 app.put('/api/settings', wrap(async (req, res) => {
-  const allowed = Object.keys(DEFAULT_SETTINGS);
+  const allowed = Object.keys(DEFAULT_SETTINGS).filter((k) => k !== 'github_copilot_token');
   for (const [k, v] of Object.entries(req.body || {})) {
     if (!allowed.includes(k)) continue;
-    if (k === 'anthropic_api_key' && v === '********') continue; // 마스킹 값은 무시
+    if ((k === 'anthropic_api_key' || k === 'gemini_api_key') && v === '********') continue; // 마스킹 값은 무시
     setSetting(k, v);
   }
   log('system', '설정이 변경되었습니다.', req.body.publish_mode ? { publish_mode: req.body.publish_mode } : {});
+  res.json({ ok: true });
+}));
+
+// ---------- GitHub Copilot 로그인 (디바이스 플로우) ----------
+app.get('/api/copilot/status', (req, res) => res.json(copilot.status()));
+
+app.post('/api/copilot/device-start', wrap(async (req, res) => {
+  res.json(await copilot.deviceStart());
+}));
+
+app.post('/api/copilot/device-poll', wrap(async (req, res) => {
+  const { device_code } = req.body || {};
+  if (!device_code) throw new Error('device_code가 필요합니다.');
+  res.json(await copilot.devicePoll(device_code));
+}));
+
+app.post('/api/copilot/logout', wrap(async (req, res) => {
+  copilot.logout();
+  log('system', 'GitHub Copilot 연결이 해제되었습니다.');
+  res.json({ ok: true });
+}));
+
+// ---------- 이미지 생성 테스트 ----------
+app.post('/api/images/test', wrap(async (req, res) => {
+  const prompt = (req.body?.prompt || '').trim() || '노트북으로 글을 쓰는 사람의 책상, 따뜻한 조명';
+  const r = await images.generateImage(prompt, { aspect: '16:9' });
+  log('system', `이미지 생성 테스트 성공: ${prompt}`);
+  res.json(r);
+}));
+
+// ---------- 글쓰기·리라이팅 지침 ----------
+app.get('/api/guidelines', wrap(async (req, res) => {
+  res.json(guidelines.list());
+}));
+
+app.put('/api/guidelines/:platform', wrap(async (req, res) => {
+  guidelines.save(req.params.platform, req.body || {});
+  log('system', `지침 수정: ${req.params.platform === '_master' ? '마스터 원고' : req.params.platform}`);
+  res.json({ ok: true });
+}));
+
+app.delete('/api/guidelines/:platform', wrap(async (req, res) => {
+  guidelines.reset(req.params.platform);
   res.json({ ok: true });
 }));
 

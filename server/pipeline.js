@@ -8,6 +8,8 @@ const { MEDIA_PLATFORMS } = require('./catalog');
 const llm = require('./llm');
 const { checkPolicy } = require('./policy');
 const adapters = require('./adapters');
+const images = require('./images');
+const cardnews = require('./cardnews');
 
 function nowISO() {
   return new Date().toISOString();
@@ -114,10 +116,38 @@ async function runPipeline({ categoryId, topicId = null, accountIds = null, mode
         try {
           const rw = await llm.rewriteForPlatform(master, account.platform, def, account);
           const vPolicy = checkPolicy(`${rw.title}\n${rw.body}`);
-          const extra = JSON.stringify({
+          const extraObj = {
             hashtags: rw.hashtags || [], caption: rw.caption || '', notes: rw.notes || '',
             policy: vPolicy, demo: Boolean(rw._demo),
-          });
+          };
+
+          // 블로그: [이미지: …] 마커 위치에 넣을 삽화를 Gemini로 생성 (키 없으면 건너뜀)
+          if (def.kind === 'blog' && images.enabled()) {
+            try {
+              const prep = await images.prepareBodyImages(rw.body, `c${contentId}a${account.id}`);
+              if (prep.images.length) {
+                extraObj.images = prep.images;
+                log('pipeline', `본문 삽화 ${prep.images.length}장 생성 — ${def.name}/${account.name}`, { contentId });
+              }
+            } catch (e) {
+              log('warn', `삽화 생성 실패(${account.name}): ${e.message} — 이미지 없이 진행`, { contentId });
+            }
+          }
+
+          // 인스타그램: 카드뉴스 이미지 자동 렌더링 (1080×1080 캐러셀)
+          if (account.platform === 'instagram' && getSetting('cardnews_enabled') === '1') {
+            try {
+              extraObj.cards = await cardnews.buildForVariant(
+                { title: rw.title, body: rw.body },
+                { accent: category.color || '#3987e5', tag: `c${contentId}a${account.id}` },
+              );
+              log('pipeline', `카드뉴스 ${extraObj.cards.length}장 렌더링 — ${account.name}`, { contentId });
+            } catch (e) {
+              log('warn', `카드뉴스 렌더링 실패(${account.name}): ${e.message} — 텍스트만 진행`, { contentId });
+            }
+          }
+
+          const extra = JSON.stringify(extraObj);
           const status = publishMode === 'auto' ? 'scheduled' : 'ready';
           const scheduledAt = publishMode === 'auto' ? slots[i] : null;
           insertVariant.run(contentId, account.id, account.platform, rw.title, rw.body, extra, status, scheduledAt);

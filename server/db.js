@@ -113,6 +113,12 @@ CREATE TABLE IF NOT EXISTS activity_log (
   meta TEXT DEFAULT '{}',
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
+
+CREATE TABLE IF NOT EXISTS guidelines (
+  platform TEXT PRIMARY KEY,
+  data TEXT DEFAULT '{}',
+  updated_at TEXT DEFAULT (datetime('now','localtime'))
+);
 `);
 
 // 스키마 마이그레이션 — 기존 DB에 새 컬럼을 추가한다(이미 있으면 무시).
@@ -136,6 +142,16 @@ const DEFAULT_SETTINGS = {
   revenue_sync_time: '06:10',       // 동기화 실행 시각 (전일 데이터 확정 이후 새벽 권장)
   revenue_sync_days: '7',           // 매 동기화 시 가져올 최근 일수 (지연 확정 수치 보정용)
   usd_krw_rate: '1400',             // USD 정산 플랫폼(타불라 등) 원화 환산 환율
+  llm_provider: 'anthropic',        // 텍스트 엔진: 'anthropic'(Claude API) | 'copilot'(GitHub Copilot 구독)
+  copilot_model: 'gpt-4o',          // Copilot 사용 시 모델 (구독 플랜에 따라 gpt-4.1, claude-sonnet-4 등)
+  github_copilot_token: '',         // GitHub 디바이스 플로우로 발급된 OAuth 토큰
+  github_copilot_user: '',          // 연결된 GitHub 계정명 (표시용)
+  gemini_api_key: '',               // 이미지 생성용 Google Gemini API 키
+  gemini_image_model: 'gemini-2.5-flash-image', // Gemini 이미지 생성 모델
+  image_gen_enabled: '1',           // 블로그 본문 [이미지: …] 마커 위치에 삽화 자동 생성
+  cardnews_enabled: '1',            // 인스타그램 변형을 카드뉴스 이미지로 자동 렌더링
+  cardnews_brand: '@mediadot',      // 카드뉴스 하단 브랜드 핸들
+  public_base_url: '',              // 이 서버의 외부 공개 URL — 인스타 API 업로드·외부 이미지 참조에 필요
 };
 
 function getSetting(key) {

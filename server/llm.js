@@ -1,9 +1,11 @@
-// LLM 콘텐츠 엔진 — Anthropic Claude API.
-// ANTHROPIC_API_KEY(환경변수) 또는 설정 화면의 API 키를 사용한다.
-// 키가 없으면 템플릿 기반 데모 생성으로 폴백해 전체 파이프라인을 확인할 수 있다(데모 표시됨).
+// LLM 콘텐츠 엔진 — Anthropic Claude API 또는 GitHub Copilot(구독 로그인).
+// 설정의 llm_provider로 우선 엔진을 고르고, 해당 엔진이 준비되지 않았으면 다른 엔진으로 폴백한다.
+// 둘 다 없으면 템플릿 기반 데모 생성으로 폴백해 전체 파이프라인을 확인할 수 있다(데모 표시됨).
 
 const Anthropic = require('@anthropic-ai/sdk');
 const { getSetting } = require('./db');
+const copilot = require('./copilot');
+const guidelines = require('./guidelines');
 
 function getClient() {
   const key = getSetting('anthropic_api_key') || process.env.ANTHROPIC_API_KEY || '';
@@ -15,9 +17,40 @@ function model() {
   return getSetting('llm_model') || 'claude-opus-4-8';
 }
 
+/** 사용 가능한 엔진 결정: 설정 우선순위 → 준비된 엔진 폴백 → null(데모) */
+function activeProvider() {
+  const pref = getSetting('llm_provider') || 'anthropic';
+  const claudeReady = Boolean(getSetting('anthropic_api_key') || process.env.ANTHROPIC_API_KEY);
+  const copilotReady = copilot.isConnected();
+  if (pref === 'copilot') return copilotReady ? 'copilot' : (claudeReady ? 'anthropic' : null);
+  return claudeReady ? 'anthropic' : (copilotReady ? 'copilot' : null);
+}
+
+/** Copilot 응답에서 JSON 추출 — 코드펜스·앞뒤 잡음을 걷어낸다. */
+function parseJSONLoose(text) {
+  let t = String(text || '').trim();
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) t = fence[1].trim();
+  const start = t.indexOf('{');
+  const end = t.lastIndexOf('}');
+  if (start >= 0 && end > start) t = t.slice(start, end + 1);
+  return JSON.parse(t);
+}
+
 async function jsonRequest({ system, prompt, schema, maxTokens = 16000 }) {
+  const provider = activeProvider();
+  if (!provider) return null;
+
+  if (provider === 'copilot') {
+    const raw = await copilot.chat({
+      system: `${system}\n\n중요: 반드시 아래 JSON 스키마를 만족하는 JSON 객체 하나만 출력하세요. 설명·코드펜스·다른 텍스트를 붙이지 마세요.`,
+      prompt: `${prompt}\n\n[출력 JSON 스키마]\n${JSON.stringify(schema)}`,
+      maxTokens: Math.min(maxTokens, 8000),
+    });
+    return parseJSONLoose(raw);
+  }
+
   const client = getClient();
-  if (!client) return null;
   const response = await client.messages.create({
     model: model(),
     max_tokens: maxTokens,
@@ -99,14 +132,14 @@ const MASTER_SCHEMA = {
 };
 
 async function generateMaster(topic, category) {
+  const guide = guidelines.masterGuide();
   const result = await jsonRequest({
     system: [
       '당신은 한국어 콘텐츠 전문 작가입니다. 검색 유입과 광고 수익을 목표로 하는 정보성 원고를 씁니다.',
       '원칙:',
-      '- 사실에 근거하고, 확인 불가한 수치·효능은 단정하지 않는다.',
-      '- 의료·금융 과장 표현, 수익 보장 표현, 클릭베이트를 쓰지 않는다(광고 게재 제한 방지).',
-      '- 독자가 끝까지 읽게 만드는 구조(문제 제기 → 해결 → 실행 팁)로 쓴다.',
-    ].join('\n'),
+      guide.base,
+      guide.custom ? `\n[운영자 추가 지침 — 반드시 반영]\n${guide.custom}` : '',
+    ].filter(Boolean).join('\n'),
     prompt: [
       `주제: ${topic.title}`,
       `핵심 키워드: ${topic.keywords || '-'}`,
@@ -163,7 +196,9 @@ const REWRITE_SCHEMA = {
 };
 
 async function rewriteForPlatform(master, platformKey, platformDef, account) {
-  const p = platformDef.rewriteProfile;
+  // 지침 탭에서 수정한 프로파일이 있으면 그것을 사용한다.
+  const p = guidelines.profileFor(platformKey) || platformDef.rewriteProfile;
+  const isBlog = platformDef.kind === 'blog';
   const result = await jsonRequest({
     system: [
       '당신은 멀티 플랫폼 콘텐츠 리라이팅 전문가입니다. 하나의 원고를 플랫폼별로 완전히 다른 글로 재창작합니다.',
@@ -184,8 +219,10 @@ async function rewriteForPlatform(master, platformKey, platformDef, account) {
       `- 구조: ${p.structure}`,
       `- 분량: ${p.length}`,
       `- 전략: ${p.notes}`,
+      p.extra ? `- 운영자 추가 지침(반드시 반영): ${p.extra}` : '',
       '',
       '위 프로파일에 맞춰 리라이팅하세요.',
+      isBlog ? '- 본문 중간에 어울리는 삽화 위치를 [이미지: 장면을 구체적으로 묘사] 형식으로 2~3곳 표시하세요(이미지가 자동 생성되어 삽입됩니다).' : '',
       '- title: 이 플랫폼용 제목(원본 제목과 다르게)',
       '- body: 본문(형식이 cards면 카드별로 "=== 카드 N ===" 구분, thread면 "=== 포스트 N ===" 구분, script면 장면 지시 포함 대본)',
       '- hashtags: SNS/숏폼이면 해시태그 목록, 블로그면 태그 목록',
@@ -207,8 +244,21 @@ async function rewriteForPlatform(master, platformKey, platformDef, account) {
   };
 }
 
+/** 텍스트 엔진(Claude 또는 Copilot)이 하나라도 준비되었는지 */
 function hasApiKey() {
-  return Boolean(getSetting('anthropic_api_key') || process.env.ANTHROPIC_API_KEY);
+  return activeProvider() !== null;
 }
 
-module.exports = { generateTopics, generateMaster, rewriteForPlatform, hasApiKey };
+/** 사이드바·설정 표시용 엔진 정보 */
+function engineInfo() {
+  const provider = activeProvider();
+  return {
+    ready: provider !== null,
+    provider,
+    label: provider === 'copilot'
+      ? `Copilot (${getSetting('copilot_model') || 'gpt-4o'})`
+      : provider === 'anthropic' ? `Claude (${model()})` : '데모 모드',
+  };
+}
+
+module.exports = { generateTopics, generateMaster, rewriteForPlatform, hasApiKey, engineInfo };

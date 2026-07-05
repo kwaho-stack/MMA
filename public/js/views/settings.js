@@ -88,18 +88,80 @@ async function viewSettings(el) {
     </div>
 
     <div class="card">
-      <div class="card-title">AI 콘텐츠 엔진 (Claude)</div>
+      <div class="card-title">AI 텍스트 엔진 <span style="font-weight:400; color:var(--muted)">현재: ${esc(s.engine?.label || '데모 모드')}</span></div>
       <div class="field">
-        <label>Anthropic API 키 ${s.anthropic_api_key_set ? '<span class="badge badge-ok">연결됨</span>' : '<span class="badge badge-warn">미등록 — 데모 모드</span>'}</label>
-        <input type="password" id="api-key" value="${esc(s.anthropic_api_key)}" placeholder="sk-ant-..." autocomplete="off" />
-        <div class="hint">키가 없으면 자리표시 데모 원고로 파이프라인이 동작합니다. 등록하면 Claude가 주제 발굴·원고 작성·플랫폼별 리라이팅을 수행합니다. (환경변수 ANTHROPIC_API_KEY로도 설정 가능)</div>
+        <label>우선 사용할 엔진</label>
+        <select id="llm-provider">
+          <option value="anthropic" ${s.llm_provider !== 'copilot' ? 'selected' : ''}>Claude API (Anthropic 키)</option>
+          <option value="copilot" ${s.llm_provider === 'copilot' ? 'selected' : ''}>GitHub Copilot (구독 로그인)</option>
+        </select>
+        <div class="hint">선택한 엔진이 준비되지 않았으면 다른 엔진으로 자동 폴백, 둘 다 없으면 데모 모드로 동작합니다.</div>
       </div>
-      <div class="field" style="margin-bottom:0;">
-        <label>모델</label>
+      <div class="field">
+        <label>Anthropic API 키 ${s.anthropic_api_key_set ? '<span class="badge badge-ok">연결됨</span>' : '<span class="badge badge-warn">미등록</span>'}</label>
+        <input type="password" id="api-key" value="${esc(s.anthropic_api_key)}" placeholder="sk-ant-..." autocomplete="off" />
+        <div class="hint">환경변수 ANTHROPIC_API_KEY로도 설정 가능. 원고 품질이 수익을 좌우하므로 상위 모델 권장.</div>
+      </div>
+      <div class="field">
+        <label>Claude 모델</label>
         <select id="model">
           ${['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5'].map((m) => `<option value="${m}" ${s.llm_model === m ? 'selected' : ''}>${m}${m === 'claude-opus-4-8' ? ' (권장 — 최고 품질)' : m === 'claude-sonnet-5' ? ' (균형)' : ' (저비용·고속)'}</option>`).join('')}
         </select>
-        <div class="hint">원고 품질이 수익을 좌우합니다. 리라이팅 차별화가 중요하므로 상위 모델을 권장합니다.</div>
+      </div>
+      <div class="field-row" style="margin-bottom:0;">
+        <div class="field" style="margin-bottom:0;">
+          <label>GitHub Copilot ${s.copilot?.connected ? `<span class="badge badge-ok">연결됨${s.copilot.user ? ` — @${esc(s.copilot.user)}` : ''}</span>` : '<span class="badge badge-warn">미연결</span>'}</label>
+          ${s.copilot?.connected
+            ? '<button class="btn btn-danger" id="copilot-logout" type="button">연결 해제</button>'
+            : '<button class="btn btn-primary" id="copilot-login" type="button">🔑 GitHub로 로그인</button>'}
+          <div class="hint">개인 Copilot 구독 계정으로 로그인하면 별도 API 키 없이 원고 작성·리라이팅을 수행합니다.</div>
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Copilot 모델</label>
+          <input id="copilot-model" value="${esc(s.copilot_model)}" placeholder="gpt-4o" />
+          <div class="hint">구독 플랜에 따라 gpt-4o, gpt-4.1, o3-mini, claude-sonnet-4 등</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">이미지 엔진 (Gemini) · 카드뉴스</div>
+      <div class="field">
+        <label>Gemini API 키 ${s.gemini_api_key_set ? '<span class="badge badge-ok">연결됨</span>' : '<span class="badge badge-warn">미등록 — 삽화 생성 꺼짐</span>'}</label>
+        <input type="password" id="gemini-key" value="${esc(s.gemini_api_key)}" placeholder="AIza..." autocomplete="off" />
+        <div class="hint">Google AI Studio(aistudio.google.com)에서 발급. 리라이팅 원고의 [이미지: …] 마커 위치에 삽화를 자동 생성해 발행 시 삽입합니다.</div>
+      </div>
+      <div class="field-row">
+        <div class="field" style="display:flex; align-items:center; gap:10px;">
+          <label class="switch"><input type="checkbox" id="img-on" ${s.image_gen_enabled === '1' ? 'checked' : ''} /><span class="track"></span></label>
+          <div><b style="font-size:13px;">블로그 삽화 자동 생성</b>
+          <div class="hint">네이버·티스토리·블로그스팟·워드프레스 본문 중간 이미지</div></div>
+        </div>
+        <div class="field" style="display:flex; align-items:center; gap:10px;">
+          <label class="switch"><input type="checkbox" id="card-on" ${s.cardnews_enabled === '1' ? 'checked' : ''} /><span class="track"></span></label>
+          <div><b style="font-size:13px;">인스타그램 카드뉴스 렌더링</b>
+          <div class="hint">1080×1080 카드 이미지 자동 제작 → 캐러셀 업로드</div></div>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>이미지 모델</label>
+          <input id="gemini-model" value="${esc(s.gemini_image_model)}" placeholder="gemini-2.5-flash-image" />
+        </div>
+        <div class="field">
+          <label>카드뉴스 브랜드 핸들</label>
+          <input id="card-brand" value="${esc(s.cardnews_brand)}" placeholder="@mediadot" />
+          <div class="hint">카드 상·하단에 표시되는 계정 핸들</div>
+        </div>
+      </div>
+      <div class="field" style="margin-bottom:0;">
+        <label>서버 공개 URL (public_base_url)</label>
+        <input id="pub-url" value="${esc(s.public_base_url)}" placeholder="https://my-mediadot.example.com" />
+        <div class="hint">인스타그램 API 업로드·블로그스팟/워드프레스 이미지 참조에는 외부 접근 가능한 이미지 URL이 필요합니다. 이 서버를 외부 공개(또는 터널링)한 주소를 입력하세요. 네이버·티스토리 브라우저 발행은 파일을 직접 업로드하므로 불필요.</div>
+      </div>
+      <div class="variant-actions" style="margin-top:12px;">
+        <button class="btn btn-sm" id="img-test" type="button">🎨 이미지 생성 테스트</button>
+        <span id="img-test-result" style="font-size:12px; color:var(--muted)"></span>
       </div>
     </div>
 
@@ -129,6 +191,14 @@ async function viewSettings(el) {
         simulate_publish: el.querySelector('#sim').checked ? '1' : '0',
         anthropic_api_key: el.querySelector('#api-key').value.trim(),
         llm_model: el.querySelector('#model').value,
+        llm_provider: el.querySelector('#llm-provider').value,
+        copilot_model: el.querySelector('#copilot-model').value.trim() || 'gpt-4o',
+        gemini_api_key: el.querySelector('#gemini-key').value.trim(),
+        gemini_image_model: el.querySelector('#gemini-model').value.trim() || 'gemini-2.5-flash-image',
+        image_gen_enabled: el.querySelector('#img-on').checked ? '1' : '0',
+        cardnews_enabled: el.querySelector('#card-on').checked ? '1' : '0',
+        cardnews_brand: el.querySelector('#card-brand').value.trim(),
+        public_base_url: el.querySelector('#pub-url').value.trim(),
         revenue_sync_enabled: el.querySelector('#rs-on').checked ? '1' : '0',
         revenue_sync_time: el.querySelector('#rs-time').value.trim(),
         revenue_sync_days: el.querySelector('#rs-days').value,
@@ -137,5 +207,72 @@ async function viewSettings(el) {
       toast('설정이 저장되었습니다.', 'good');
       render();
     } catch (e) { toast(e.message, 'bad'); }
+  });
+
+  // ---- GitHub Copilot 디바이스 플로우 로그인 ----
+  const loginBtn = el.querySelector('#copilot-login');
+  if (loginBtn) loginBtn.addEventListener('click', async () => {
+    loginBtn.disabled = true;
+    try {
+      const d = await API.post('/api/copilot/device-start');
+      openModal({
+        title: 'GitHub Copilot 로그인',
+        body: `
+          <p style="font-size:13px; color:var(--text-2); margin-bottom:14px;">아래 코드를 복사한 뒤 GitHub 인증 페이지에 입력하세요. 인증이 끝나면 자동으로 연결됩니다.</p>
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+            <code id="cp-code" style="font-size:26px; font-weight:800; letter-spacing:3px; padding:10px 18px; background:rgba(255,255,255,.05); border-radius:8px;">${esc(d.user_code)}</code>
+            <button class="btn btn-sm" id="cp-copy" type="button">복사</button>
+          </div>
+          <a class="btn btn-primary" href="${esc(d.verification_uri)}" target="_blank" rel="noopener">GitHub 인증 페이지 열기 ↗</a>
+          <div class="hint" style="margin-top:12px;" id="cp-status">인증 대기 중… (${Math.round(d.expires_in / 60)}분 안에 입력)</div>`,
+        footer: `<button class="btn" data-close>닫기</button>`,
+      });
+      document.getElementById('cp-copy').addEventListener('click', async () => {
+        await navigator.clipboard.writeText(d.user_code);
+        toast('코드가 복사되었습니다.', 'good');
+      });
+      const timer = setInterval(async () => {
+        if (!document.getElementById('cp-status')) { clearInterval(timer); return; } // 모달 닫힘
+        try {
+          const r = await API.post('/api/copilot/device-poll', { device_code: d.device_code });
+          if (r.ok) {
+            clearInterval(timer);
+            closeModal();
+            toast(`GitHub Copilot 연결 완료${r.user ? ` — @${r.user}` : ''}`, 'good');
+            render();
+          }
+        } catch (e) {
+          clearInterval(timer);
+          const st = document.getElementById('cp-status');
+          if (st) { st.textContent = `실패: ${e.message}`; st.style.color = 'var(--critical)'; }
+        }
+      }, (d.interval || 5) * 1000 + 500);
+    } catch (e) {
+      toast(e.message, 'bad');
+      loginBtn.disabled = false;
+    }
+  });
+
+  const logoutBtn = el.querySelector('#copilot-logout');
+  if (logoutBtn) logoutBtn.addEventListener('click', async () => {
+    if (!confirm('GitHub Copilot 연결을 해제할까요?')) return;
+    await API.post('/api/copilot/logout');
+    toast('연결이 해제되었습니다.');
+    render();
+  });
+
+  // ---- 이미지 생성 테스트 ----
+  el.querySelector('#img-test').addEventListener('click', async () => {
+    const btn = el.querySelector('#img-test');
+    const out = el.querySelector('#img-test-result');
+    btn.disabled = true; out.textContent = '생성 중… (수 초 소요)'; out.style.color = 'var(--muted)';
+    try {
+      const r = await API.post('/api/images/test', {});
+      out.innerHTML = `✓ 성공 — <a href="${esc(r.file)}" target="_blank" rel="noopener" style="color:var(--good)">생성된 이미지 보기 ↗</a>`;
+    } catch (e) {
+      out.textContent = `실패: ${e.message}`;
+      out.style.color = 'var(--critical)';
+    }
+    btn.disabled = false;
   });
 }

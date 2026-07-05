@@ -6,6 +6,7 @@ const ROUTES = {
   '/queue': viewQueue,
   '/accounts': viewAccounts,
   '/categories': viewCategories,
+  '/guidelines': viewGuidelines,
   '/revenue': viewRevenue,
   '/settings': viewSettings,
 };
@@ -41,7 +42,7 @@ async function refreshQueueBadge() {
         <div class="mode-line"><span class="dot" style="background:${d.settings.publish_mode === 'auto' ? 'var(--good)' : 'var(--warning)'}"></span>
           발행: ${d.settings.publish_mode === 'auto' ? '완전 자동' : '컨펌 후 발행'}</div>
         <div class="mode-line"><span class="dot" style="background:${d.settings.llm_ready ? 'var(--good)' : 'var(--muted)'}"></span>
-          LLM: ${d.settings.llm_ready ? 'Claude 연결됨' : '데모 모드'}</div>
+          LLM: ${d.settings.llm_ready ? esc(d.settings.llm_label || '연결됨') : '데모 모드'}</div>
         <div class="mode-line"><span class="dot" style="background:${d.settings.simulate_publish === '1' ? 'var(--s4)' : 'var(--good)'}"></span>
           배포: ${d.settings.simulate_publish === '1' ? '시뮬레이션' : '실제 발행'}</div>`;
     }

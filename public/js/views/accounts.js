@@ -30,8 +30,9 @@ async function viewAccounts(el) {
           <tbody>
             ${media.map((m) => {
               const def = catalog.media[m.platform] || {};
-              const isApi = def.publish && def.publish.mode === 'api';
-              const credsOk = isApi && def.publish.credentialFields.filter((f) => f.required).every((f) => m.credentials[f.key]);
+              const pubMode = def.publish ? def.publish.mode : 'manual';
+              const isAuto = ['api', 'browser'].includes(pubMode);
+              const credsOk = isAuto && def.publish.credentialFields.filter((f) => f.required).every((f) => m.credentials[f.key]);
               return `
                 <tr style="${m.active ? '' : 'opacity:.45'}">
                   <td><span class="badge badge-info">${esc(def.name || m.platform)}</span></td>
@@ -40,8 +41,10 @@ async function viewAccounts(el) {
                     ${m.url ? `<div style="font-size:11.5px; color:var(--muted)">${esc(m.url)}</div>` : ''}
                   </td>
                   <td><span class="badge"><span class="bdot" style="background:${esc(m.category_color || '#555')}"></span>${esc(m.category_name || '미지정')}</span></td>
-                  <td>${isApi
-                    ? (credsOk ? '<span class="badge badge-ok">API 자동</span>' : '<span class="badge badge-warn" title="자격증명 미등록 — 등록 전까지 수동/시뮬레이션 발행">API (인증 필요)</span>')
+                  <td>${isAuto
+                    ? (credsOk
+                      ? (pubMode === 'browser' ? '<span class="badge badge-violet">브라우저 자동</span>' : '<span class="badge badge-ok">API 자동</span>')
+                      : `<span class="badge badge-warn" title="${pubMode === 'browser' ? '로그인 정보 미등록 — 등록 전까지 수동/시뮬레이션 발행' : '자격증명 미등록 — 등록 전까지 수동/시뮬레이션 발행'}">${pubMode === 'browser' ? '자동 (로그인 필요)' : 'API (인증 필요)'}</span>`)
                     : '<span class="badge">반자동(복사)</span>'}</td>
                   <td>${m.matchings.length
                     ? m.matchings.map((mt) => `<span class="badge" style="margin:1px"><span class="bdot" style="background:${AD_COLORS[mt.ad_platform] || 'var(--s1)'}"></span>${esc(mt.ad_name)}</span>`).join(' ')
@@ -119,7 +122,7 @@ async function viewAccounts(el) {
       body: `
         <div class="field"><label>플랫폼</label>
           <select id="m-platform" ${existing ? 'disabled' : ''}>
-            ${platforms.map(([k, p]) => `<option value="${k}" ${existing && existing.platform === k ? 'selected' : ''}>${esc(p.name)} — ${p.publish.mode === 'api' ? 'API 자동발행' : '반자동(복사)'}</option>`).join('')}
+            ${platforms.map(([k, p]) => `<option value="${k}" ${existing && existing.platform === k ? 'selected' : ''}>${esc(p.name)} — ${p.publish.mode === 'api' ? 'API 자동발행' : p.publish.mode === 'browser' ? '브라우저 자동발행' : '반자동(복사)'}</option>`).join('')}
           </select></div>
         <div class="field"><label>계정 이름 *</label><input id="m-name" value="${esc(existing?.name || '')}" placeholder="예: 이슈스팟 블로그" /></div>
         <div class="field"><label>담당 카테고리</label>
@@ -138,7 +141,9 @@ async function viewAccounts(el) {
       const def = catalog.media[sel.value];
       document.getElementById('m-mode-hint').textContent = def.publish.mode === 'api'
         ? `이 플랫폼은 ${def.publish.api}로 자동 발행됩니다. 자격증명이 없으면 등록 전까지 수동 발행으로 처리됩니다.`
-        : (def.publish.manualReason || '');
+        : def.publish.mode === 'browser'
+          ? `${def.publish.manualReason || ''} 로그인 세션은 이 서버에만 저장되며, 첫 발행 시 자동 로그인합니다.`
+          : (def.publish.manualReason || '');
     };
     sel.addEventListener('change', () => {
       document.getElementById('m-creds').innerHTML = credFieldsHTML(catalog.media[sel.value]);

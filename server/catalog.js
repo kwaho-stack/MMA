@@ -1,7 +1,9 @@
 // 플랫폼 카탈로그 — 미디어(발행) 플랫폼과 광고(수익) 플랫폼 정의.
-// rewriteProfile은 LLM 리라이팅 프롬프트에 그대로 주입되는 플랫폼별 전략이다.
-// publish.mode: 'api'  = 공식 API로 자동 발행 가능 (자격증명 필요)
-//               'manual' = 공식 발행 API가 없거나 종료됨 → 복사·붙여넣기 패키지 생성(반자동)
+// rewriteProfile은 LLM 리라이팅 프롬프트에 주입되는 플랫폼별 기본 전략이다.
+// (지침 탭에서 수정하면 guidelines 테이블의 값이 우선 적용된다)
+// publish.mode: 'api'     = 공식 API로 자동 발행 (자격증명 필요)
+//               'browser' = 공식 API가 없어 브라우저 자동화(Playwright)로 발행 — 실패 시 수동 폴백
+//               'manual'  = 완성 원고 복사·붙여넣기 패키지 생성(반자동)
 
 const MEDIA_PLATFORMS = {
   blogger: {
@@ -28,10 +30,14 @@ const MEDIA_PLATFORMS = {
     name: '네이버 블로그',
     kind: 'blog',
     publish: {
-      mode: 'manual',
-      api: null,
-      manualReason: '네이버 블로그는 공식 발행 API가 없음(구 XML-RPC API 종료). 복사용 완성 원고를 생성해 붙여넣기로 발행.',
-      credentialFields: [{ key: 'blog_url', label: '블로그 주소', required: false }],
+      mode: 'browser',
+      api: '브라우저 자동화 (스마트에디터 ONE)',
+      manualReason: '네이버 블로그는 공식 발행 API가 없어(구 XML-RPC 종료) 브라우저 자동화로 발행합니다. 로그인 정보가 없거나 캡차·2단계 인증으로 자동화가 막히면 복사·붙여넣기 수동 발행으로 전환됩니다.',
+      credentialFields: [
+        { key: 'naver_id', label: '네이버 아이디', required: true },
+        { key: 'naver_pw', label: '네이버 비밀번호', required: true, secret: true },
+        { key: 'blog_url', label: '블로그 주소', required: false },
+      ],
     },
     adFit: ['adpost'],
     rewriteProfile: {
@@ -46,10 +52,14 @@ const MEDIA_PLATFORMS = {
     name: '티스토리',
     kind: 'blog',
     publish: {
-      mode: 'manual',
-      api: null,
-      manualReason: '티스토리 Open API가 2024년 종료됨. 완성 HTML 원고를 생성해 에디터에 붙여넣기로 발행.',
-      credentialFields: [{ key: 'blog_url', label: '블로그 주소', required: false }],
+      mode: 'browser',
+      api: '브라우저 자동화 (티스토리 에디터)',
+      manualReason: '티스토리 Open API가 2024년 종료되어 브라우저 자동화로 발행합니다. 로그인 정보가 없거나 2단계 인증으로 자동화가 막히면 복사·붙여넣기 수동 발행으로 전환됩니다.',
+      credentialFields: [
+        { key: 'kakao_email', label: '카카오 계정(이메일)', required: true },
+        { key: 'kakao_pw', label: '카카오 비밀번호', required: true, secret: true },
+        { key: 'blog_name', label: '블로그 이름 (xxx.tistory.com의 xxx)', required: true },
+      ],
     },
     adFit: ['adsense', 'adfit', 'coupang_partners', 'dable'],
     rewriteProfile: {
@@ -86,11 +96,11 @@ const MEDIA_PLATFORMS = {
     kind: 'sns',
     publish: {
       mode: 'api',
-      api: 'Instagram Graph API (이미지 필수)',
+      api: 'Instagram Graph API (카드뉴스 캐러셀 자동 업로드)',
       credentialFields: [
         { key: 'ig_user_id', label: 'IG 비즈니스 계정 ID', required: true },
         { key: 'access_token', label: 'Meta Access Token', required: true, secret: true },
-        { key: 'default_image_url', label: '기본 카드 이미지 URL(없으면 수동)', required: false },
+        { key: 'default_image_url', label: '대체 이미지 URL(카드뉴스 실패 시)', required: false },
       ],
     },
     adFit: ['coupang_partners'],
