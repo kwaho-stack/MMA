@@ -6,7 +6,9 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server/index.js",
-    "seed": "node server/seed.js --demo"
+    "seed": "node server/seed.js --demo",
+    "setup-browser": "playwright install chromium",
+    "postinstall": "playwright install chromium || echo '[미디어닷] 크로미움 자동 설치 실패 — 네이버·티스토리 자동 발행을 쓰려면 npm run setup-browser 를 직접 실행하세요.'"
   },
   "engines": {
     "node": ">=22.5.0"

@@ -5,11 +5,14 @@
 ## 실행
 
 ```bash
-npm install
-npm start        # http://localhost:3400
+npm install                    # 의존성 + 크로미움 자동 설치(postinstall)
+# 크로미움 자동 설치가 실패했다면 한 번만 직접 실행:
+npm run setup-browser          # = playwright install chromium
+npm start                      # http://localhost:3400
 ```
 
 - **Node.js 22.5 이상** 필요 (내장 `node:sqlite` 사용 — 별도 DB 설치 불필요)
+- **네이버 블로그·티스토리 자동 발행**에는 크로미움 브라우저가 필요합니다. `npm install`이 자동으로 받지만(postinstall), 막힌 환경이면 `npm run setup-browser`를 실행하세요. 미설치 시 자동 발행이 수동 발행(복사·붙여넣기)으로 안전하게 전환됩니다.
 - 첫 실행 시 데모 데이터(카테고리·계정·매칭·주제·수익)가 자동 시드됩니다. 모두 수정/삭제 가능.
 - DB는 `data/mediadot.db`에 저장됩니다. 초기화하려면 `data/` 폴더를 삭제하세요.
 

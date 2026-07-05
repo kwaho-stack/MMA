@@ -5,6 +5,7 @@ const { db, getSetting } = require('./db');
 const { MEDIA_PLATFORMS, AD_PLATFORMS } = require('./catalog');
 const llm = require('./llm');
 const gemini = require('./gemini');
+const browser = require('./browser');
 
 function credsOf(row) {
   try { return JSON.parse(row.credentials || '{}'); } catch { return {}; }
@@ -92,7 +93,22 @@ function check(categoryId) {
     }
   }
 
-  // 4) 인스타그램 캐러셀 업로드 요건
+  // 4) 브라우저 자동 발행 요건 (네이버·티스토리) — 실계정 모드에서만 점검
+  const browserAccounts = accounts.filter((a) => a.mode === 'browser');
+  if (browserAccounts.length && !simulate) {
+    const names = browserAccounts.map((a) => a.platform_name).filter((v, i, arr) => arr.indexOf(v) === i).join('·');
+    if (!browser.binaryReady()) {
+      items.push({
+        ok: false, level: 'warn', label: `브라우저 자동 발행 (${names})`,
+        detail: '크로미움 미설치 — 서버에서 `npx playwright install chromium` 실행 필요. 미설치 시 수동 발행으로 전환됩니다',
+      });
+    } else {
+      const ready = browserAccounts.filter((a) => a.ready);
+      if (ready.length) items.push({ ok: true, label: `브라우저 자동 발행 (${names})`, detail: `${ready.length}개 계정 로그인 정보 등록됨 — 자동 발행 가능` });
+    }
+  }
+
+  // 5) 인스타그램 캐러셀 업로드 요건
   const igAccounts = accounts.filter((a) => a.platform === 'instagram');
   if (igAccounts.length && !simulate && getSetting('cardnews_enabled') === '1' && !getSetting('public_base_url')) {
     items.push({
@@ -101,7 +117,7 @@ function check(categoryId) {
     });
   }
 
-  // 5) 주제 풀
+  // 6) 주제 풀
   const pool = db.prepare(`SELECT COUNT(*) n FROM topics WHERE category_id = ? AND status = 'pool'`).get(categoryId).n;
   items.push(pool > 0
     ? { ok: true, label: '주제 풀', detail: `대기 중인 주제 ${pool}건` }

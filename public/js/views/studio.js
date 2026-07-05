@@ -333,7 +333,9 @@ function renderVariantCard(v, { showContent = false } = {}) {
           ${extra.pinned_comment ? `<div class="extra-line"><span class="xk">고정 댓글</span><span class="xv">${esc(extra.pinned_comment)}</span><button class="btn btn-sm act-copy-text" data-copy="${esc(extra.pinned_comment)}">복사</button></div>` : ''}
           ${extra.ad_snippet ? `<div class="extra-line"><span class="xk">광고 문구</span><span class="xv">${esc(extra.ad_snippet)}</span><button class="btn btn-sm act-copy-text" data-copy="${esc(extra.ad_snippet)}">복사</button></div>` : ''}
         </div>` : ''}
-      ${v.error ? `<div style="color:var(--critical); font-size:12px; margin-top:6px;">✕ ${esc(v.error)}</div>` : ''}
+      ${v.error && v.status === 'manual'
+        ? `<div style="color:var(--warning); font-size:12px; margin-top:6px; line-height:1.5;">⚠ 자동 발행 대신 수동으로 전환된 이유: ${esc(v.error)}</div>`
+        : v.error ? `<div style="color:var(--critical); font-size:12px; margin-top:6px;">✕ ${esc(v.error)}</div>` : ''}
       <div class="variant-actions">
         ${v.body ? `<button class="btn btn-sm act-expand">전체 보기</button>` : ''}
         ${['ready', 'approved'].includes(v.status) ? `

@@ -40,7 +40,36 @@ async function launch() {
       });
     } catch (e) { lastErr = e; }
   }
-  throw new Error(`Chromium 실행 실패: ${lastErr?.message || '알 수 없음'}`);
+  // 브라우저 실행 파일이 없는 경우가 가장 흔하다 — npm install만으로는 브라우저가 안 받아진다.
+  const msg = String(lastErr?.message || '');
+  if (/Executable doesn'?t exist|please run the following command|install/i.test(msg)) {
+    throw new Error('브라우저(크로미움)가 설치되지 않았습니다. 서버가 있는 곳에서 `npx playwright install chromium` 을 한 번 실행한 뒤 다시 시도하세요. (네이버·티스토리 자동 발행에 필요)');
+  }
+  throw new Error(`크로미움 실행 실패: ${msg || '알 수 없음'}`);
+}
+
+/** 브라우저 자동 발행 사용 가능 여부 — 프리플라이트 점검용. */
+async function isAvailable() {
+  try {
+    const b = await launch();
+    await b.close().catch(() => {});
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: String(e.message || e) };
+  }
+}
+
+/** 브라우저를 실행하지 않고 실행 파일 존재만 빠르게 확인한다(프리플라이트 GET용). */
+function binaryReady() {
+  const known = ['/opt/pw-browsers/chromium', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome', process.env.CHROME_PATH]
+    .filter(Boolean);
+  if (known.some((p) => fs.existsSync(p))) return true;
+  try {
+    const p = chromium().executablePath();
+    return Boolean(p && fs.existsSync(p));
+  } catch {
+    return false;
+  }
 }
 
 function sessionFile(mediaAccountId) {
@@ -92,4 +121,4 @@ async function clickFirst(scope, selectors, { timeout = 4000, optional = false }
   throw new Error(`클릭할 요소를 찾지 못했습니다: ${selectors.join(' | ')}`);
 }
 
-module.exports = { launch, withAccountPage, clearSession, clickFirst, SESSION_DIR };
+module.exports = { launch, withAccountPage, clearSession, clickFirst, isAvailable, binaryReady, SESSION_DIR };

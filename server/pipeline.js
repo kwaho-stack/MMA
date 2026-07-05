@@ -233,7 +233,9 @@ async function publishVariant(variantId) {
   try {
     const result = await adapters.publish(account.platform, account, v);
     if (result.mode === 'manual') {
-      db.prepare(`UPDATE variants SET status = 'manual', error = '' WHERE id = ?`).run(variantId);
+      // 수동 폴백 사유를 variant에 기록 — 발행 큐에서 "왜 수동인지" 바로 보이게 한다.
+      db.prepare(`UPDATE variants SET status = 'manual', error = ? WHERE id = ?`)
+        .run(result.reason || '', variantId);
       log('publish', `수동 발행 대기: ${def.name}/${account.name} — ${result.reason}`, { variantId });
       return { manual: true, reason: result.reason };
     }
