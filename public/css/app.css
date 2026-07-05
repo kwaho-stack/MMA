@@ -286,3 +286,64 @@ code.inline { background: var(--surface-3); border-radius: 4px; padding: 1px 6px
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 6px; border: 2px solid var(--page); }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ===== 원클릭 히어로 실행 바 (대시보드) ===== */
+.hero-run {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: linear-gradient(135deg, rgba(57,135,229,.12), rgba(57,135,229,.03));
+  border: 1px solid rgba(57,135,229,.35); border-radius: var(--radius);
+  padding: 18px 20px; margin-bottom: 16px;
+}
+.hero-run .hero-title { font-size: 15px; font-weight: 700; margin-right: 4px; }
+.hero-run select { min-width: 180px; }
+.hero-run .hint { width: 100%; margin-top: 2px; }
+
+/* ===== 실시간 진행 스테퍼 ===== */
+.stepper { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 0; }
+.stepper .st { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.stepper .st .ico {
+  width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface-3); border: 1px solid var(--border-strong); font-size: 10.5px; font-weight: 700;
+}
+.stepper .st.done { color: var(--text-2); }
+.stepper .st.done .ico { background: rgba(12,163,12,.18); border-color: rgba(12,163,12,.5); color: #7dd87d; }
+.stepper .st.active { color: var(--text); font-weight: 600; }
+.stepper .st.active .ico { background: rgba(57,135,229,.2); border-color: var(--accent); color: #9ec5f4; animation: pulse 1.4s ease-in-out infinite; }
+.stepper .st.fail .ico { background: rgba(216,57,49,.18); border-color: rgba(216,57,49,.55); color: #ff8f88; }
+.stepper .st-bar { width: 22px; height: 2px; background: var(--baseline); margin: 0 8px; border-radius: 2px; }
+.stepper .st.done + .st-bar, .st-bar.done { background: rgba(12,163,12,.45); }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(57,135,229,.35); } 50% { box-shadow: 0 0 0 5px rgba(57,135,229,0); } }
+
+.progress-track { height: 6px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
+.progress-track > i { display: block; height: 100%; border-radius: 4px; background: var(--accent); transition: width .5s ease; }
+
+/* ===== 프리플라이트 체크리스트 ===== */
+.checklist { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.check-item { display: flex; align-items: flex-start; gap: 9px; font-size: 12.5px; padding: 8px 11px; border-radius: 7px; background: var(--surface); border: 1px solid var(--grid); }
+.check-item .ck { font-weight: 800; font-size: 12px; margin-top: 1px; }
+.check-item.ok .ck { color: var(--good); }
+.check-item.warn { border-color: rgba(222,168,62,.35); }
+.check-item.warn .ck { color: var(--warning); }
+.check-item.error { border-color: rgba(216,57,49,.45); }
+.check-item.error .ck { color: var(--critical); }
+.check-item .fix-link { margin-left: auto; font-size: 11.5px; color: #9ec5f4; white-space: nowrap; text-decoration: none; }
+.check-item .fix-link:hover { text-decoration: underline; }
+
+/* ===== 고급 설정 아코디언 ===== */
+details.adv { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); margin-bottom: 14px; }
+details.adv > summary {
+  cursor: pointer; list-style: none; padding: 14px 18px; font-size: 13px; font-weight: 650;
+  display: flex; align-items: center; gap: 8px; color: var(--text-2); user-select: none;
+}
+details.adv > summary::-webkit-details-marker { display: none; }
+details.adv > summary::before { content: '▸'; color: var(--muted); transition: transform .15s; }
+details.adv[open] > summary::before { transform: rotate(90deg); }
+details.adv > summary .sum-hint { font-weight: 400; font-size: 12px; color: var(--muted); margin-left: auto; }
+details.adv > .adv-body { padding: 4px 18px 18px; border-top: 1px solid var(--grid); padding-top: 16px; }
+details.adv:hover > summary { color: var(--text); }
+
+/* 변형 카드 부가 산출물 (CTA·고정댓글·광고문구) */
+.variant-extras { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+.extra-line { font-size: 12px; padding: 7px 10px; border-radius: 6px; background: var(--surface); border: 1px solid var(--grid); display: flex; gap: 8px; align-items: baseline; }
+.extra-line .xk { color: var(--muted); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.extra-line .xv { color: var(--text-2); flex: 1; }

@@ -128,6 +128,7 @@ function ensureColumn(table, ddl) {
 ensureColumn('revenues', `source TEXT DEFAULT 'manual'`);      // 'manual' | 'sync'
 ensureColumn('ad_accounts', 'last_sync_at TEXT');
 ensureColumn('ad_accounts', `sync_error TEXT DEFAULT ''`);
+ensureColumn('contents', `progress TEXT DEFAULT '{}'`);        // 파이프라인 실시간 진행 상황(JSON)
 
 const DEFAULT_SETTINGS = {
   publish_mode: 'confirm',          // 'auto' = 예약시간에 자동 발행, 'confirm' = 사용자 최종 컨펌 후 발행

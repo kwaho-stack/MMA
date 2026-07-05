@@ -92,6 +92,34 @@ function statusBadge(status) {
   return `<span class="badge ${cls}">${label}</span>`;
 }
 
+// 파이프라인 실시간 진행 스테퍼 — contents.progress(JSON) 기반. 대시보드·콘텐츠 상세 공용.
+function renderStepper(progress = {}, contentStatus = '') {
+  const stage = progress.stage
+    || (contentStatus === 'generating' ? 'draft'
+      : contentStatus === 'rewriting' ? 'rewrite'
+      : ['publishing', 'ready', 'published'].includes(contentStatus) ? 'done' : 'draft');
+  const failed = stage === 'failed' || contentStatus === 'failed';
+  const rwText = progress.rewrite_total
+    ? ` ${Math.min(progress.rewrite_done || 0, progress.rewrite_total)}/${progress.rewrite_total}`
+    : '';
+  const finalLabel = stage === 'publish' || contentStatus === 'publishing' ? '분산 예약 발행'
+    : contentStatus === 'published' ? '발행 완료' : '승인 대기';
+  const steps = [
+    { label: '주제 선정' },
+    { label: '원고 작성' },
+    { label: '정책 검사' },
+    { label: `리라이팅${rwText}` },
+    { label: finalLabel },
+  ];
+  const ORDER = { draft: 1, policy: 2, rewrite: 3, publish: 5, ready: 5, done: 5 };
+  const cur = failed ? ((progress.rewrite_done || 0) > 0 || stage === 'rewrite' ? 3 : 1) : (ORDER[stage] ?? 1);
+  return `<div class="stepper">${steps.map((s, i) => {
+    const state = failed && i === cur ? 'fail' : i < cur ? 'done' : i === cur ? 'active' : '';
+    const ico = state === 'done' ? '✓' : state === 'fail' ? '✕' : i + 1;
+    return `<span class="st ${state}"><span class="ico">${ico}</span>${s.label}</span>${i < steps.length - 1 ? `<span class="st-bar ${i < cur - 1 ? 'done' : ''}"></span>` : ''}`;
+  }).join('')}</div>`;
+}
+
 // 광고 플랫폼별 고정 색 (카테고리컬 — 순서 고정, 순환 금지)
 const AD_COLORS = {
   adsense: 'var(--s1)', adpost: 'var(--s2)', adfit: 'var(--s3)',

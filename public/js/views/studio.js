@@ -3,11 +3,12 @@
 async function viewStudio(el, sub) {
   if (sub && sub[0] === 'content' && sub[1]) return viewContentDetail(el, Number(sub[1]));
 
-  const [categories, topics, contents, settings] = await Promise.all([
+  const [categories, topics, contents, settings, history] = await Promise.all([
     API.get('/api/categories'),
     API.get('/api/topics?status=pool'),
     API.get('/api/contents'),
     API.get('/api/settings'),
+    API.get('/api/topics/history'),
   ]);
 
   el.innerHTML = `
@@ -55,6 +56,7 @@ async function viewStudio(el, sub) {
             : '컨펌 모드: 리라이팅 완료 후 발행 큐에서 검토·승인해야 발행됩니다.'}
         </span>
       </div>
+      <div class="checklist" id="preflight"></div>
     </div>
 
     <div class="grid grid-2" style="margin-top:16px;">
@@ -99,6 +101,30 @@ async function viewStudio(el, sub) {
           </table>` : '<div class="empty">아직 콘텐츠가 없습니다</div>'}
       </div>
     </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-title">📚 발행 이력 (${history.length})
+        <span style="font-weight:400; color:var(--muted)">이미 다룬 주제 — AI 주제 발굴과 자동발행에서 자동으로 중복이 걸러집니다</span>
+      </div>
+      ${history.length ? `
+        <table class="tbl">
+          <thead><tr><th>주제</th><th>카테고리</th><th>발행일</th><th class="num">발행 채널</th><th>상태</th><th></th></tr></thead>
+          <tbody>
+            ${history.map((h) => `
+              <tr>
+                <td>
+                  <div style="font-weight:600">${esc(h.title)}</div>
+                  ${h.keywords ? `<div style="font-size:11px; color:var(--muted)">${esc(h.keywords)}</div>` : ''}
+                </td>
+                <td><span class="badge"><span class="bdot" style="background:${esc(h.category_color || '#888')}"></span>${esc(h.category_name || '-')}</span></td>
+                <td style="font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums;">${h.last_published_at ? fmt.datetime(h.last_published_at) : '<span style="color:var(--muted)">미발행</span>'}</td>
+                <td class="num">${h.published_channels || 0}</td>
+                <td>${h.content_status ? statusBadge(h.content_status) : '<span class="badge">사용됨</span>'}</td>
+                <td style="text-align:right">${h.content_id ? `<a class="btn btn-sm" href="#/studio/content/${h.content_id}">콘텐츠 →</a>` : ''}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>` : '<div class="empty">아직 발행한 주제가 없습니다</div>'}
+    </div>
   `;
 
   // 카테고리 변경 시 주제 목록 필터
@@ -110,8 +136,25 @@ async function viewStudio(el, sub) {
       topics.filter((t) => t.category_id === cid)
         .map((t) => `<option value="${t.id}">${esc(t.title)}</option>`).join('');
   }
-  catSel.addEventListener('change', fillTopics);
+  // 발행 전 자동 점검 (프리플라이트) — 실패 요인을 실행 전에 체크리스트로 보여준다
+  async function loadPreflight() {
+    const box = el.querySelector('#preflight');
+    if (!catSel.value) { box.innerHTML = ''; return; }
+    try {
+      const pf = await API.get(`/api/preflight?category_id=${catSel.value}`);
+      box.innerHTML = pf.items.map((i) => `
+        <div class="check-item ${i.ok ? 'ok' : (i.level || 'warn')}">
+          <span class="ck">${i.ok ? '✓' : i.level === 'error' ? '✕' : '⚠'}</span>
+          <span><b>${esc(i.label)}</b> — ${esc(i.detail)}</span>
+          ${i.fix ? `<a class="fix-link" href="${esc(i.fix)}">해결하러 가기 →</a>` : ''}
+        </div>`).join('');
+      el.querySelector('#run-pipeline').disabled = !pf.ok;
+    } catch { box.innerHTML = ''; }
+  }
+
+  catSel.addEventListener('change', () => { fillTopics(); loadPreflight(); });
   fillTopics();
+  loadPreflight();
 
   el.querySelector('#run-pipeline').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
@@ -152,15 +195,26 @@ async function viewStudio(el, sub) {
       footer: `<button class="btn" data-close>취소</button><button class="btn btn-primary" id="m-save">추가</button>`,
     });
     document.getElementById('m-save').addEventListener('click', async () => {
+      const payload = {
+        category_id: Number(document.getElementById('m-cat').value),
+        title: document.getElementById('m-title').value.trim(),
+        keywords: document.getElementById('m-kw').value.trim(),
+        angle: document.getElementById('m-angle').value.trim(),
+      };
       try {
-        await API.post('/api/topics', {
-          category_id: Number(document.getElementById('m-cat').value),
-          title: document.getElementById('m-title').value.trim(),
-          keywords: document.getElementById('m-kw').value.trim(),
-          angle: document.getElementById('m-angle').value.trim(),
-        });
+        await API.post('/api/topics', payload);
         closeModal(); toast('주제가 추가되었습니다.', 'good'); render();
-      } catch (err) { toast(err.message, 'bad'); }
+      } catch (err) {
+        // 중복 주제 경고 — 사용자가 원하면 그대로 등록(force)
+        if (String(err.message).includes('비슷한 주제')) {
+          if (confirm(`${err.message}\n\n같은 주제를 다시 발행하면 중복 콘텐츠로 노출이 떨어질 수 있습니다. 그래도 추가할까요?`)) {
+            try {
+              await API.post('/api/topics', { ...payload, force: true });
+              closeModal(); toast('주제가 추가되었습니다. (중복 경고 무시)', 'info'); render();
+            } catch (e2) { toast(e2.message, 'bad'); }
+          }
+        } else { toast(err.message, 'bad'); }
+      }
     });
   });
 
@@ -186,15 +240,6 @@ async function viewContentDetail(el, id) {
     : policy.level === 'low' ? '<span class="badge badge-warn">확인 필요</span>'
     : policy.level === 'ok' ? '<span class="badge badge-ok">정책 통과</span>' : '';
 
-  const stepState = (n) => {
-    const order = { generating: 2, rewriting: 3, ready: 5, publishing: 5, published: 6, failed: 0 };
-    const cur = order[c.status] ?? 5;
-    if (c.status === 'failed') return n <= 1 ? 'done' : '';
-    if (n < cur) return 'done';
-    if (n === cur) return 'active';
-    return '';
-  };
-
   el.innerHTML = `
     <div class="page-head">
       <div>
@@ -209,23 +254,22 @@ async function viewContentDetail(el, id) {
     </div>
 
     <div class="card">
-      <div class="pipe-steps">
-        <span class="pipe-step done"><span class="pnum">✓</span>주제 선정</span><span class="pipe-arrow">─►</span>
-        <span class="pipe-step ${stepState(2)}"><span class="pnum">2</span>원고 작성</span><span class="pipe-arrow">─►</span>
-        <span class="pipe-step ${stepState(3)}"><span class="pnum">3</span>리라이팅</span><span class="pipe-arrow">─►</span>
-        <span class="pipe-step ${stepState(4) || stepState(3)}"><span class="pnum">4</span>정책 검사</span><span class="pipe-arrow">─►</span>
-        <span class="pipe-step ${stepState(5)}"><span class="pnum">5</span>배포</span>
-      </div>
-      ${inProgress ? '<div style="font-size:12.5px; color:#9ec5f4; margin-top:8px;">⏳ 파이프라인 진행 중 — 자동으로 새로고침됩니다.</div>' : ''}
-      ${c.status === 'failed' ? `<div style="font-size:12.5px; color:var(--critical); margin-top:8px;">✕ 실패: ${esc(c.error)}</div>` : ''}
+      ${renderStepper(c.progress || {}, c.status)}
+      ${inProgress && c.progress?.current ? `<div style="font-size:12.5px; color:#9ec5f4; margin-top:9px;">⏳ 지금: ${esc(c.progress.current)} 리라이팅 중 — 자동으로 새로고침됩니다.</div>`
+        : inProgress ? '<div style="font-size:12.5px; color:#9ec5f4; margin-top:9px;">⏳ 파이프라인 진행 중 — 자동으로 새로고침됩니다.</div>' : ''}
+      ${c.status === 'failed' ? `<div style="font-size:12.5px; color:var(--critical); margin-top:9px;">✕ 실패: ${esc(c.error)}</div>` : ''}
     </div>
 
     ${policy.hits && policy.hits.length ? `
       <div class="card">
-        <div class="card-title">정책 검사 결과 — 광고 게재 제한 위험 표현</div>
+        <div class="card-title">정책 검사 결과 — 광고 게재 제한 위험 표현 ${policy.level === 'high' ? '<span class="badge badge-danger">자동 발행 차단됨 — 수정 후 발행하세요</span>' : ''}</div>
         ${policy.hits.map((h) => `
-          <div class="policy-hit"><b>"${esc(h.word)}"</b> — ${esc(h.category)} (${h.level === 'high' ? '높음' : h.level === 'medium' ? '중간' : '낮음'})<br>
-          <span style="color:var(--muted)">${esc(h.advice)}</span></div>`).join('')}
+          <div class="policy-hit">
+            <b>"${esc(h.word)}"</b> — ${esc(h.category)} (${h.level === 'high' ? '높음' : h.level === 'medium' ? '중간' : '낮음'})
+            ${h.context ? `<div style="color:var(--muted); font-size:11.5px; margin-top:3px;">…문맥: ${esc(h.context)}</div>` : ''}
+            ${h.suggestion ? `<div style="margin-top:3px;">💡 이렇게 바꿔보세요: <span style="color:var(--good)">"${esc(h.suggestion)}"</span></div>` : ''}
+            <div style="color:var(--muted); margin-top:3px;">${esc(h.advice)}</div>
+          </div>`).join('')}
       </div>` : ''}
 
     ${c.body ? `
@@ -283,6 +327,12 @@ function renderVariantCard(v, { showContent = false } = {}) {
           ${extra.images.map((im) => `<a href="${esc(im.file)}" target="_blank" rel="noopener" title="${esc(im.prompt)}"><img src="${esc(im.file)}" alt="${esc(im.prompt)}" style="width:96px; height:54px; border-radius:6px; border:1px solid rgba(255,255,255,.08); object-fit:cover;" loading="lazy" /></a>`).join('')}
           <span style="font-size:11px; color:var(--muted); align-self:center; white-space:nowrap;">본문 삽화 ${extra.images.length}장 — 발행 시 마커 위치에 삽입</span>
         </div>` : ''}
+      ${extra.cta || extra.pinned_comment || extra.ad_snippet ? `
+        <div class="variant-extras">
+          ${extra.cta ? `<div class="extra-line"><span class="xk">CTA</span><span class="xv">${esc(extra.cta)}</span></div>` : ''}
+          ${extra.pinned_comment ? `<div class="extra-line"><span class="xk">고정 댓글</span><span class="xv">${esc(extra.pinned_comment)}</span><button class="btn btn-sm act-copy-text" data-copy="${esc(extra.pinned_comment)}">복사</button></div>` : ''}
+          ${extra.ad_snippet ? `<div class="extra-line"><span class="xk">광고 문구</span><span class="xv">${esc(extra.ad_snippet)}</span><button class="btn btn-sm act-copy-text" data-copy="${esc(extra.ad_snippet)}">복사</button></div>` : ''}
+        </div>` : ''}
       ${v.error ? `<div style="color:var(--critical); font-size:12px; margin-top:6px;">✕ ${esc(v.error)}</div>` : ''}
       <div class="variant-actions">
         ${v.body ? `<button class="btn btn-sm act-expand">전체 보기</button>` : ''}
@@ -308,6 +358,10 @@ const PLATFORM_NAMES = {
 };
 
 function bindVariantActions(el, refresh) {
+  el.querySelectorAll('.act-copy-text').forEach((b) => b.addEventListener('click', async () => {
+    await navigator.clipboard.writeText(b.dataset.copy || '');
+    toast('클립보드에 복사되었습니다.', 'good');
+  }));
   el.querySelectorAll('.act-expand').forEach((b) => b.addEventListener('click', () => {
     const body = b.closest('.variant-card').querySelector('.variant-body');
     body.classList.toggle('expanded');

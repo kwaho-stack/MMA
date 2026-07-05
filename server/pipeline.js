@@ -10,6 +10,7 @@ const { checkPolicy } = require('./policy');
 const adapters = require('./adapters');
 const images = require('./images');
 const cardnews = require('./cardnews');
+const dedup = require('./topic-dedup');
 
 function nowISO() {
   return new Date().toISOString();
@@ -19,6 +20,23 @@ function touchContent(id, fields) {
   const sets = Object.keys(fields).map((k) => `${k} = ?`).join(', ');
   db.prepare(`UPDATE contents SET ${sets}, updated_at = datetime('now','localtime') WHERE id = ?`)
     .run(...Object.values(fields), id);
+}
+
+/** 파이프라인 실시간 진행 상황을 contents.progress(JSON)에 병합 기록 — UI 스테퍼가 폴링한다. */
+function setProgress(contentId, patch) {
+  const row = db.prepare('SELECT progress FROM contents WHERE id = ?').get(contentId);
+  let cur = {};
+  try { cur = JSON.parse(row?.progress || '{}'); } catch { /* 손상 시 초기화 */ }
+  const next = { ...cur, ...patch, updated_at: new Date().toISOString() };
+  db.prepare(`UPDATE contents SET progress = ? WHERE id = ?`).run(JSON.stringify(next), contentId);
+}
+
+/** 계정에 매칭된 광고 플랫폼 목록 — 리라이팅 프롬프트에 광고 맥락으로 주입된다. */
+function matchedAdsOf(mediaAccountId) {
+  return db.prepare(
+    `SELECT a.platform, a.name FROM matchings mt JOIN ad_accounts a ON a.id = mt.ad_account_id
+     WHERE mt.media_account_id = ?`,
+  ).all(mediaAccountId);
 }
 
 function publishedTodayCount(mediaAccountId) {
@@ -65,15 +83,21 @@ async function runPipeline({ categoryId, topicId = null, accountIds = null, mode
     topic = db.prepare(`SELECT * FROM topics WHERE category_id = ? AND status = 'pool' ORDER BY id LIMIT 1`).get(categoryId);
   }
   if (!topic) {
-    const generated = await llm.generateTopics(category, 3);
+    // 기발행·기존 주제를 제외 목록으로 넘겨 같은 주제의 재발행을 막는다.
+    const generated = await llm.generateTopics(category, 3, { exclude: dedup.recentTitles(categoryId) });
+    const { kept, skipped } = dedup.filterNew(generated);
+    if (skipped.length) {
+      log('warn', `중복 주제 ${skipped.length}건 제외: ${skipped.map((s) => `"${s.title}"`).join(', ')}`, { categoryId });
+    }
+    if (!kept.length) throw new Error('AI가 제안한 주제가 모두 기존 주제와 중복됩니다. 주제 풀에 새 주제를 직접 추가하거나 다시 시도하세요.');
     const insert = db.prepare('INSERT INTO topics(category_id, title, keywords, angle, source) VALUES(?,?,?,?,?)');
     let firstId = null;
-    for (const t of generated) {
+    for (const t of kept) {
       const r = insert.run(categoryId, t.title, t.keywords, t.angle, 'llm');
       if (firstId === null) firstId = Number(r.lastInsertRowid);
     }
     topic = db.prepare('SELECT * FROM topics WHERE id = ?').get(firstId);
-    log('pipeline', `주제 풀이 비어 있어 새 주제 ${generated.length}건을 생성했습니다.`, { categoryId });
+    log('pipeline', `주제 풀이 비어 있어 새 주제 ${kept.length}건을 생성했습니다.`, { categoryId });
   }
 
   // 2) 콘텐츠 레코드 생성
@@ -82,12 +106,14 @@ async function runPipeline({ categoryId, topicId = null, accountIds = null, mode
   ).run(topic.id, categoryId, topic.title, 'generating').lastInsertRowid);
   db.prepare(`UPDATE topics SET status = 'used' WHERE id = ?`).run(topic.id);
   log('pipeline', `파이프라인 시작: "${topic.title}" (${category.name}, 대상 계정 ${accounts.length}개)`, { contentId });
+  setProgress(contentId, { stage: 'draft', rewrite_total: accounts.length, rewrite_done: 0, current: '' });
 
   // 이후 단계는 비동기 진행 — 호출자는 contentId로 진행 상황을 폴링한다.
   (async () => {
     try {
       // 3) 마스터 원고 생성
       const master = await llm.generateMaster(topic, category);
+      setProgress(contentId, { stage: 'policy' });
       const policy = checkPolicy(`${master.title}\n${master.body}`);
       touchContent(contentId, {
         title: master.title,
@@ -97,12 +123,17 @@ async function runPipeline({ categoryId, topicId = null, accountIds = null, mode
         policy_report: JSON.stringify(policy),
         status: 'rewriting',
       });
-      if (policy.level === 'high') {
-        log('warn', `정책 위험(높음) 감지: "${master.title}" — 발행 전 수정 권장`, { contentId, hits: policy.hits.length });
-      }
+      setProgress(contentId, { stage: 'rewrite', policy_level: policy.level });
 
       // 4) 플랫폼별 리라이팅
-      const publishMode = mode || getSetting('publish_mode');
+      let publishMode = mode || getSetting('publish_mode');
+      // 정책 위험(높음)이면 완전 자동이라도 강제로 컨펌 모드 — 수정 없이 나가는 것을 막는다.
+      if (policy.level === 'high' && publishMode === 'auto') {
+        publishMode = 'confirm';
+        log('warn', `정책 위험(높음) 감지: "${master.title}" — 자동 발행을 중단하고 승인 대기로 전환했습니다. 발행 큐에서 지적 표현을 수정 후 발행하세요.`, { contentId, hits: policy.hits.length });
+      } else if (policy.level === 'high') {
+        log('warn', `정책 위험(높음) 감지: "${master.title}" — 발행 전 수정 권장`, { contentId, hits: policy.hits.length });
+      }
       const slots = scheduleSlots(accounts.length);
       const insertVariant = db.prepare(
         `INSERT INTO variants(content_id, media_account_id, platform, title, body, extra, status, scheduled_at)
@@ -113,11 +144,15 @@ async function runPipeline({ categoryId, topicId = null, accountIds = null, mode
         const account = accounts[i];
         const def = MEDIA_PLATFORMS[account.platform];
         if (!def) continue;
+        setProgress(contentId, { rewrite_done: i, current: `${def.name} · ${account.name}` });
         try {
-          const rw = await llm.rewriteForPlatform(master, account.platform, def, account);
+          const rw = await llm.rewriteForPlatform(master, account.platform, def, account, {
+            ads: matchedAdsOf(account.id),
+          });
           const vPolicy = checkPolicy(`${rw.title}\n${rw.body}`);
           const extraObj = {
             hashtags: rw.hashtags || [], caption: rw.caption || '', notes: rw.notes || '',
+            cta: rw.cta || '', pinned_comment: rw.pinned_comment || '', ad_snippet: rw.ad_snippet || '',
             policy: vPolicy, demo: Boolean(rw._demo),
           };
 
@@ -160,6 +195,7 @@ async function runPipeline({ categoryId, topicId = null, accountIds = null, mode
       }
 
       touchContent(contentId, { status: publishMode === 'auto' ? 'publishing' : 'ready' });
+      setProgress(contentId, { stage: publishMode === 'auto' ? 'publish' : 'ready', rewrite_done: accounts.length, current: '' });
       log('pipeline',
         publishMode === 'auto'
           ? `리라이팅 완료 — ${accounts.length}건을 ${getSetting('publish_gap_min')}분 간격으로 분산 예약했습니다.`
@@ -167,6 +203,7 @@ async function runPipeline({ categoryId, topicId = null, accountIds = null, mode
         { contentId });
     } catch (e) {
       touchContent(contentId, { status: 'failed', error: String(e.message || e) });
+      setProgress(contentId, { stage: 'failed', error: String(e.message || e) });
       log('error', `파이프라인 실패: ${e.message}`, { contentId });
     }
   })();

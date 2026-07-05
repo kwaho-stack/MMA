@@ -26,8 +26,9 @@ async function viewSettings(el) {
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-title">정기 자동발행 스케줄</div>
+    <details class="adv">
+      <summary>정기 자동발행 스케줄 <span class="sum-hint">${s.schedule_enabled === '1' ? `켜짐 — 매일 ${esc(s.schedule_times)}` : '꺼짐'}</span></summary>
+      <div class="adv-body">
       <div class="field" style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
         <label class="switch"><input type="checkbox" id="sch-on" ${s.schedule_enabled === '1' ? 'checked' : ''} /><span class="track"></span></label>
         <div><b style="font-size:13px;">정해진 시간에 알아서 발행</b>
@@ -38,10 +39,12 @@ async function viewSettings(el) {
         <input id="sch-times" value="${esc(s.schedule_times)}" placeholder="09:30,19:30" />
         <div class="hint">예: 09:30,13:00,19:30 — 검색·피드 트래픽이 몰리는 출근/점심/저녁 시간대 권장</div>
       </div>
-    </div>
+      </div>
+    </details>
 
-    <div class="card">
-      <div class="card-title">발행 안전장치 <span style="font-weight:400; color:var(--muted)">스팸·저품질 판정으로 수익이 막히는 것을 방지</span></div>
+    <details class="adv">
+      <summary>발행 안전장치 <span class="sum-hint">간격 ${esc(s.publish_gap_min)}분 · 일일 ${esc(s.daily_limit_per_account)}건 · ${s.simulate_publish === '1' ? '시뮬레이션' : '실제 발행'}</span></summary>
+      <div class="adv-body">
       <div class="field-row">
         <div class="field">
           <label>계정 간 발행 간격 (분)</label>
@@ -59,10 +62,12 @@ async function viewSettings(el) {
         <div><b style="font-size:13px;">시뮬레이션 발행 모드</b>
         <div class="hint">켜져 있으면 외부 플랫폼 API를 호출하지 않고 발행 성공으로 처리합니다(전체 플로우 테스트용). 실계정 자격증명 등록 후 끄세요.</div></div>
       </div>
-    </div>
+      </div>
+    </details>
 
-    <div class="card">
-      <div class="card-title">수익 자동 동기화 <span style="font-weight:400; color:var(--muted)">애드센스 · 쿠팡 파트너스 · 타불라 · 유튜브</span></div>
+    <details class="adv">
+      <summary>수익 자동 동기화 <span class="sum-hint">${s.revenue_sync_enabled === '1' ? `켜짐 — 매일 ${esc(s.revenue_sync_time)}` : '꺼짐'} · 애드센스·쿠팡·타불라·유튜브</span></summary>
+      <div class="adv-body">
       <div class="field" style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
         <label class="switch"><input type="checkbox" id="rs-on" ${s.revenue_sync_enabled === '1' ? 'checked' : ''} /><span class="track"></span></label>
         <div><b style="font-size:13px;">매일 자동으로 수익 가져오기</b>
@@ -85,7 +90,8 @@ async function viewSettings(el) {
           <div class="hint">타불라 등 달러 정산 플랫폼의 원화 환산에 사용</div>
         </div>
       </div>
-    </div>
+      </div>
+    </details>
 
     <div class="card">
       <div class="card-title">AI 텍스트 엔진 <span style="font-weight:400; color:var(--muted)">현재: ${esc(s.engine?.label || '데모 모드')}</span></div>
@@ -125,8 +131,9 @@ async function viewSettings(el) {
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-title">Google 계정 연결 <span style="font-weight:400; color:var(--muted)">텍스트(Gemini)·이미지 엔진 공용 — API 키 대신 계정 로그인</span></div>
+    <details class="adv">
+      <summary>Google 계정 연결 (OAuth) <span class="sum-hint">${s.google?.connected ? `연결됨${s.google.user ? ` — ${esc(s.google.user)}` : ''}` : 'API 키 대신 계정 로그인'}</span></summary>
+      <div class="adv-body">
       <div class="field-row">
         <div class="field">
           <label>OAuth Client ID</label>
@@ -155,7 +162,8 @@ async function viewSettings(el) {
           <div class="hint">gemini-2.5-flash(빠름) · gemini-2.5-pro(고품질)</div>
         </div>
       </div>
-    </div>
+      </div>
+    </details>
 
     <div class="card">
       <div class="card-title">이미지 엔진 (Gemini) · 카드뉴스 <span style="font-weight:400; color:var(--muted)">${s.gemini_auth ? `현재 인증: ${esc(s.gemini_auth)}` : '인증 필요'}</span></div>

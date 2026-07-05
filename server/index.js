@@ -13,6 +13,8 @@ const gemini = require('./gemini');
 const images = require('./images');
 const guidelines = require('./guidelines');
 const accountsIO = require('./accounts-io');
+const preflight = require('./preflight');
+const dedup = require('./topic-dedup');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -79,8 +81,13 @@ app.get('/api/dashboard', wrap(async (req, res) => {
      FROM contents ct LEFT JOIN categories c ON c.id = ct.category_id
      ORDER BY ct.id DESC LIMIT 6`,
   ).all();
+  for (const r of recentContents) { try { r.progress = JSON.parse(r.progress || '{}'); } catch { r.progress = {}; } }
+
+  // 지금 실행 중인 파이프라인 (원클릭 실행 후 대시보드에서 바로 보이는 진행 위젯용)
+  const running = recentContents.filter((r) => ['generating', 'rewriting'].includes(r.status));
 
   res.json({
+    running,
     counts,
     revenue: { daily: revenueDaily, byAd: revenueByAd, total30d: revenue30d, prev30d: prev },
     categories: categoryStats,
@@ -269,8 +276,25 @@ app.get('/api/topics', wrap(async (req, res) => {
 }));
 
 app.post('/api/topics', wrap(async (req, res) => {
-  const { category_id, title, keywords = '', angle = '' } = req.body;
+  const { category_id, title, keywords = '', angle = '', force = false } = req.body;
   if (!title) throw new Error('주제 제목은 필수입니다.');
+  // 중복 주제 방지 — 비슷한 주제가 이미 있으면 경고 (force=true면 무시하고 등록)
+  if (!force) {
+    const similar = dedup.findSimilar(title);
+    if (similar) {
+      return res.status(409).json({
+        duplicate: true,
+        similar: {
+          title: similar.topic.title,
+          status: similar.topic.status,
+          category_name: similar.topic.category_name,
+          last_published_at: similar.topic.last_published_at,
+          score: Math.round(similar.score * 100),
+        },
+        error: `비슷한 주제가 이미 있습니다: "${similar.topic.title}" (유사도 ${Math.round(similar.score * 100)}%${similar.topic.last_published_at ? ', 발행됨' : ''})`,
+      });
+    }
+  }
   const r = db.prepare('INSERT INTO topics(category_id, title, keywords, angle, source) VALUES(?,?,?,?,?)')
     .run(category_id || null, title, keywords, angle, 'manual');
   res.json({ id: Number(r.lastInsertRowid) });
@@ -280,11 +304,37 @@ app.post('/api/topics/generate', wrap(async (req, res) => {
   const { category_id, count = 5 } = req.body;
   const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(category_id);
   if (!category) throw new Error('카테고리를 찾을 수 없습니다.');
-  const topics = await llm.generateTopics(category, Math.min(Number(count) || 5, 10));
+  // 기존 주제를 제외 목록으로 전달 + 생성 결과에서도 유사 주제 필터링 (중복 발행 방지)
+  const topics = await llm.generateTopics(category, Math.min(Number(count) || 5, 10), { exclude: dedup.recentTitles(category_id) });
+  const { kept, skipped } = dedup.filterNew(topics);
   const insert = db.prepare('INSERT INTO topics(category_id, title, keywords, angle, source) VALUES(?,?,?,?,?)');
-  const ids = topics.map((t) => Number(insert.run(category_id, t.title, t.keywords, t.angle, 'llm').lastInsertRowid));
-  log('topic', `주제 ${ids.length}건 생성 (${category.name})${llm.hasApiKey() ? '' : ' — 데모 모드'}`);
-  res.json({ ids, demo: !llm.hasApiKey() });
+  const ids = kept.map((t) => Number(insert.run(category_id, t.title, t.keywords, t.angle, 'llm').lastInsertRowid));
+  log('topic', `주제 ${ids.length}건 생성 (${category.name})${skipped.length ? ` — 중복 ${skipped.length}건 제외` : ''}${llm.hasApiKey() ? '' : ' — 데모 모드'}`);
+  res.json({ ids, skipped, demo: !llm.hasApiKey() });
+}));
+
+// ---------- 발행 이력 (주제 중복 방지용 조회) ----------
+app.get('/api/topics/history', wrap(async (req, res) => {
+  const rows = db.prepare(
+    `SELECT t.id, t.title, t.keywords, t.status, t.created_at,
+       c.name category_name, c.color category_color,
+       ct.id content_id, ct.status content_status,
+       (SELECT COUNT(*) FROM variants v WHERE v.content_id = ct.id AND v.status = 'published') published_channels,
+       (SELECT MAX(v.published_at) FROM variants v WHERE v.content_id = ct.id AND v.status = 'published') last_published_at
+     FROM topics t
+     LEFT JOIN categories c ON c.id = t.category_id
+     LEFT JOIN contents ct ON ct.topic_id = t.id
+     WHERE t.status = 'used'
+     ORDER BY COALESCE(last_published_at, t.created_at) DESC LIMIT 200`,
+  ).all();
+  res.json(rows);
+}));
+
+// ---------- 프리플라이트 (발행 전 점검) ----------
+app.get('/api/preflight', wrap(async (req, res) => {
+  const categoryId = Number(req.query.category_id);
+  if (!categoryId) throw new Error('category_id가 필요합니다.');
+  res.json(preflight.check(categoryId));
 }));
 
 app.delete('/api/topics/:id', wrap(async (req, res) => {
@@ -309,6 +359,7 @@ app.get('/api/contents', wrap(async (req, res) => {
      FROM contents ct LEFT JOIN categories c ON c.id = ct.category_id
      ORDER BY ct.id DESC LIMIT 50`,
   ).all();
+  for (const r of rows) { try { r.progress = JSON.parse(r.progress || '{}'); } catch { r.progress = {}; } }
   res.json(rows);
 }));
 
@@ -319,6 +370,7 @@ app.get('/api/contents/:id', wrap(async (req, res) => {
   ).get(req.params.id);
   if (!content) throw new Error('콘텐츠를 찾을 수 없습니다.');
   content.policy_report = JSON.parse(content.policy_report || '{}');
+  try { content.progress = JSON.parse(content.progress || '{}'); } catch { content.progress = {}; }
   const variants = db.prepare(
     `SELECT v.*, m.name account_name FROM variants v
      LEFT JOIN media_accounts m ON m.id = v.media_account_id

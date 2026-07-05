@@ -111,11 +111,21 @@ async function viewAccounts(el) {
 
   // ---- 미디어 계정 추가/수정 ----
   function credFieldsHTML(def, existing = {}) {
-    return (def.publish.credentialFields || []).map((f) => `
+    const fields = def.publish.credentialFields || [];
+    if (!fields.length) return '';
+    const hasValue = fields.some((f) => existing[f.key]);
+    const required = fields.some((f) => f.required);
+    const inner = fields.map((f) => `
       <div class="field">
         <label>${esc(f.label)}${f.required ? ' *' : ''}</label>
         <input data-cred="${f.key}" type="${f.secret ? 'password' : 'text'}" value="${esc(existing[f.key] || '')}" autocomplete="off" />
       </div>`).join('');
+    // 자격증명은 접어두어 모달을 미니멀하게 — 필수인데 비어 있으면 펼쳐서 안내
+    return `
+      <details class="adv" ${hasValue || required ? 'open' : ''} style="margin-bottom:12px;">
+        <summary>발행 인증 정보 <span class="sum-hint">${hasValue ? '등록됨' : required ? '자동 발행에 필요' : '선택 입력'}</span></summary>
+        <div class="adv-body">${inner}</div>
+      </details>`;
   }
 
   function mediaModal(existing = null) {

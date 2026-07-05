@@ -14,14 +14,38 @@ async function viewDashboard(el) {
       </div>
       <div style="display:flex; gap:8px;">
         <a class="btn" href="#/queue">발행 큐 ${d.counts.pendingApproval ? `<span class="nav-badge">${d.counts.pendingApproval}</span>` : ''}</a>
-        <a class="btn btn-primary" href="#/studio">⚡ 자동발행 실행</a>
+        <a class="btn" href="#/studio">세부 옵션 실행 →</a>
       </div>
     </div>
+
+    <div class="hero-run">
+      <span class="hero-title">⚡ 원클릭 자동발행</span>
+      <select id="hero-cat">
+        ${d.categories.map((c) => `<option value="${c.id}" ${c.accounts ? '' : 'disabled'}>${esc(c.name)} — 계정 ${c.accounts}개 · 주제 ${c.topics}건</option>`).join('')}
+      </select>
+      <button class="btn btn-primary btn-lg" id="hero-run-btn">지금 발행</button>
+      <div class="hint">클릭 한 번으로 주제 선정 → 원고 작성 → 정책 검사 → 플랫폼별 리라이팅 → ${d.settings.publish_mode === 'auto' ? '분산 예약 발행' : '승인 대기'}까지 자동 실행됩니다. 진행 상황은 아래에 실시간 표시됩니다.</div>
+    </div>
+
+    ${d.running.length ? `
+      <div class="card" style="margin-bottom:16px; border-color: rgba(57,135,229,.35);">
+        <div class="card-title">🔄 진행 중인 파이프라인 (${d.running.length}) <span style="font-weight:400; color:var(--muted)">실시간 갱신 중</span></div>
+        ${d.running.map((c) => `
+          <div class="variant-card" style="padding:12px 14px;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:9px;">
+              <span class="badge"><span class="bdot" style="background:${esc(c.category_color || '#888')}"></span>${esc(c.category_name || '-')}</span>
+              <b style="font-size:13px; flex:1;">${esc(c.title || '(주제 선정 중…)')}</b>
+              <a class="btn btn-sm" href="#/studio/content/${c.id}">상세 →</a>
+            </div>
+            ${renderStepper(c.progress, c.status)}
+            ${c.progress.current ? `<div style="font-size:11.5px; color:var(--muted); margin-top:6px;">지금: ${esc(c.progress.current)} 리라이팅 중…</div>` : ''}
+          </div>`).join('')}
+      </div>` : ''}
 
     ${d.settings.llm_ready ? '' : `
       <div class="help-note" style="margin-bottom:16px;">
         현재 <b>데모 모드</b>입니다 — 콘텐츠는 자리표시 원고로 생성됩니다.
-        <a href="#/settings" style="color:#9ec5f4; font-weight:600;">설정</a>에서 Anthropic API 키를 등록하면 Claude가 실제 원고 작성·리라이팅을 수행하고,
+        <a href="#/settings" style="color:#9ec5f4; font-weight:600;">설정</a>에서 AI 엔진(Claude·Copilot·Gemini 중 하나)을 연결하면 실제 원고 작성·리라이팅이 수행되고,
         시뮬레이션 발행을 끄면 실제 채널로 배포됩니다.
       </div>`}
 
@@ -131,14 +155,30 @@ async function viewDashboard(el) {
     formatValue: (v) => fmt.won(v),
   });
 
+  // 원클릭 자동발행 (히어로 바)
+  const heroBtn = el.querySelector('#hero-run-btn');
+  heroBtn.addEventListener('click', async () => {
+    const catId = Number(el.querySelector('#hero-cat').value);
+    if (!catId) { toast('카테고리를 선택하세요.', 'bad'); return; }
+    heroBtn.disabled = true; heroBtn.textContent = '시작 중…';
+    try {
+      await API.post('/api/pipeline/run', { category_id: catId });
+      toast('자동발행이 시작되었습니다 — 아래 진행 상황을 지켜보세요.', 'good');
+      render(); // 진행 위젯 즉시 표시
+    } catch (e) {
+      toast(e.message, 'bad');
+      heroBtn.disabled = false; heroBtn.textContent = '지금 발행';
+    }
+  });
+
   // 카테고리 즉시 발행
   el.querySelectorAll('.run-cat').forEach((btn) => {
     btn.addEventListener('click', async () => {
       btn.disabled = true; btn.textContent = '실행 중…';
       try {
-        const r = await API.post('/api/pipeline/run', { category_id: Number(btn.dataset.id) });
-        toast('자동발행 파이프라인이 시작되었습니다. 콘텐츠 스튜디오에서 진행 상황을 확인하세요.', 'good');
-        location.hash = `#/studio/content/${r.content_id}`;
+        await API.post('/api/pipeline/run', { category_id: Number(btn.dataset.id) });
+        toast('자동발행 파이프라인이 시작되었습니다.', 'good');
+        render();
       } catch (e) {
         toast(e.message, 'bad');
         btn.disabled = false; btn.textContent = '⚡ 발행';
@@ -146,13 +186,22 @@ async function viewDashboard(el) {
     });
   });
 
+  // 진행 중 파이프라인이 있으면 2.5초마다 자동 갱신
+  if (d.running.length) {
+    clearTimeout(window.__detailPoll);
+    window.__detailPoll = setTimeout(() => {
+      const hash = location.hash.replace(/^#/, '') || '/';
+      if (hash === '/') render();
+    }, 2500);
+  }
+
   // 사이드바 모드 표시 갱신
   const mi = document.getElementById('mode-indicator');
   mi.innerHTML = `
     <div class="mode-line"><span class="dot" style="background:${d.settings.publish_mode === 'auto' ? 'var(--good)' : 'var(--warning)'}"></span>
       발행: ${d.settings.publish_mode === 'auto' ? '완전 자동' : '컨펌 후 발행'}</div>
     <div class="mode-line"><span class="dot" style="background:${d.settings.llm_ready ? 'var(--good)' : 'var(--muted)'}"></span>
-      LLM: ${d.settings.llm_ready ? 'Claude 연결됨' : '데모 모드'}</div>
+      LLM: ${d.settings.llm_ready ? esc(d.settings.llm_label || '연결됨') : '데모 모드'}</div>
     <div class="mode-line"><span class="dot" style="background:${d.settings.simulate_publish === '1' ? 'var(--s4)' : 'var(--good)'}"></span>
       배포: ${d.settings.simulate_publish === '1' ? '시뮬레이션' : '실제 발행'}</div>`;
   const qb = document.getElementById('queue-badge');
