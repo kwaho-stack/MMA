@@ -2,7 +2,7 @@
 // 각 항목은 { ok, label, detail, fix } 형태 — fix는 사용자가 바로 이동할 화면 해시.
 
 const { db, getSetting } = require('./db');
-const { MEDIA_PLATFORMS, AD_PLATFORMS } = require('./catalog');
+const { MEDIA_PLATFORMS, AD_PLATFORMS, validateCreds } = require('./catalog');
 const llm = require('./llm');
 const gemini = require('./gemini');
 const browser = require('./browser');
@@ -16,12 +16,11 @@ function accountReady(account) {
   if (!def) return { ready: false, issue: '알 수 없는 플랫폼' };
   const mode = def.publish.mode;
   if (mode === 'manual') return { ready: true, mode, note: '반자동(복사·붙여넣기)' };
-  const creds = credsOf(account);
-  const missing = def.publish.credentialFields.filter((f) => f.required && !creds[f.key]);
-  if (missing.length) {
+  const v = validateCreds(account.platform, credsOf(account));
+  if (!v.ok) {
     return {
       ready: false, mode,
-      issue: `${mode === 'browser' ? '로그인 정보' : '자격증명'} 미등록: ${missing.map((f) => f.label).join(', ')}`,
+      issue: `${mode === 'browser' ? '로그인 정보' : '자격증명'} 미등록: ${v.missing.join(', ')}`,
     };
   }
   return { ready: true, mode };

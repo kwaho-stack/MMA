@@ -12,10 +12,22 @@ const MEDIA_PLATFORMS = {
     publish: {
       mode: 'api',
       api: 'Google Blogger API v3',
+      // access_token은 1시간이면 만료되므로 refresh_token 방식을 권장한다.
+      // refresh_token(+client_id/secret)이 있으면 발행 직전에 액세스 토큰을 자동 갱신한다.
       credentialFields: [
         { key: 'blog_id', label: 'Blog ID', required: true },
-        { key: 'access_token', label: 'Google OAuth Access Token', required: true, secret: true },
+        { key: 'client_id', label: 'Google OAuth Client ID', required: false, hint: 'refresh token 방식(권장)' },
+        { key: 'client_secret', label: 'Google OAuth Client Secret', required: false, secret: true },
+        { key: 'refresh_token', label: 'Refresh Token (권장 — 만료 없음)', required: false, secret: true },
+        { key: 'access_token', label: 'Access Token (임시 대체 — 1시간 만료)', required: false, secret: true },
       ],
+      // refresh_token 세트 또는 단기 access_token 중 하나만 있으면 발행 가능.
+      validate(c) {
+        if (!c.blog_id) return { ok: false, missing: ['Blog ID'] };
+        const hasRefresh = c.refresh_token && c.client_id && c.client_secret;
+        if (hasRefresh || c.access_token) return { ok: true };
+        return { ok: false, missing: ['Refresh Token(+Client ID·Secret) 또는 Access Token'] };
+      },
     },
     adFit: ['adsense', 'coupang_partners', 'taboola', 'dable'],
     rewriteProfile: {
@@ -76,11 +88,25 @@ const MEDIA_PLATFORMS = {
     publish: {
       mode: 'api',
       api: 'WordPress REST API',
+      // 자체 호스팅(wp-json + Application Password) 과 가입형(WordPress.com public-api + 액세스 토큰) 둘 다 지원.
+      // 가입형 무료·하위 플랜은 기본 wp-json 경로를 막으므로 public-api.wordpress.com 을 사용해야 한다.
       credentialFields: [
-        { key: 'site_url', label: '사이트 URL', required: true },
-        { key: 'username', label: '사용자명', required: true },
-        { key: 'app_password', label: 'Application Password', required: true, secret: true },
+        { key: 'site_url', label: '사이트 URL', required: true, hint: '예: https://내블로그.com 또는 infodury.wordpress.com' },
+        { key: 'username', label: '사용자명 (자체 호스팅)', required: false },
+        { key: 'app_password', label: 'Application Password (자체 호스팅)', required: false, secret: true },
+        { key: 'wpcom_token', label: 'WordPress.com 액세스 토큰 (가입형 .wordpress.com)', required: false, secret: true, hint: 'developer.wordpress.com/apps 에서 발급 — 만료 없음' },
       ],
+      validate(c) {
+        if (!c.site_url) return { ok: false, missing: ['사이트 URL'] };
+        // .wordpress.com 가입형이면 액세스 토큰 필요
+        if (isWpcomHost(c.site_url) || c.wpcom_token) {
+          return c.wpcom_token ? { ok: true } : { ok: false, missing: ['WordPress.com 액세스 토큰'] };
+        }
+        const miss = [];
+        if (!c.username) miss.push('사용자명');
+        if (!c.app_password) miss.push('Application Password');
+        return miss.length ? { ok: false, missing: miss } : { ok: true };
+      },
     },
     adFit: ['adsense', 'taboola', 'dable', 'coupang_partners'],
     rewriteProfile: {
@@ -100,7 +126,7 @@ const MEDIA_PLATFORMS = {
       credentialFields: [
         { key: 'ig_user_id', label: 'IG 비즈니스 계정 ID', required: true },
         { key: 'access_token', label: 'Meta Access Token', required: true, secret: true },
-        { key: 'default_image_url', label: '대체 이미지 URL(카드뉴스 실패 시)', required: false },
+        { key: 'default_image_url', label: '대체 이미지 URL (공개 접근 가능한 https 이미지)', required: false, hint: '카드뉴스 자동 업로드가 안 될 때 이 이미지로 단일 게시. 설정 → 이미지 엔진의 전역 대체 이미지로도 지정 가능' },
       ],
     },
     adFit: ['coupang_partners'],
@@ -315,4 +341,30 @@ const AD_PLATFORMS = {
   },
 };
 
-module.exports = { MEDIA_PLATFORMS, AD_PLATFORMS };
+/** site_url이 WordPress.com 가입형 호스트(*.wordpress.com)인지 판별한다. */
+function isWpcomHost(siteUrl) {
+  if (!siteUrl) return false;
+  try {
+    const host = new URL(/^https?:\/\//.test(siteUrl) ? siteUrl : `https://${siteUrl}`).hostname;
+    return /(^|\.)wordpress\.com$/i.test(host);
+  } catch {
+    return /(^|\/|\.)wordpress\.com/i.test(String(siteUrl));
+  }
+}
+
+/**
+ * 플랫폼별 자격증명 유효성 검사 — 발행 가능 여부 게이트.
+ * def.publish.validate가 있으면 그것을 쓰고, 없으면 required 필드 전부 채워졌는지 확인한다.
+ * @returns {{ok:boolean, missing:string[]}}
+ */
+function validateCreds(platformKey, creds = {}) {
+  const def = MEDIA_PLATFORMS[platformKey];
+  if (!def || !['api', 'browser'].includes(def.publish.mode)) return { ok: false, missing: [] };
+  if (typeof def.publish.validate === 'function') return def.publish.validate(creds);
+  const missing = def.publish.credentialFields
+    .filter((f) => f.required && !(creds[f.key] && String(creds[f.key]).trim() !== ''))
+    .map((f) => f.label);
+  return { ok: missing.length === 0, missing };
+}
+
+module.exports = { MEDIA_PLATFORMS, AD_PLATFORMS, validateCreds, isWpcomHost };

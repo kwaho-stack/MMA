@@ -158,6 +158,7 @@ const DEFAULT_SETTINGS = {
   cardnews_enabled: '1',            // 인스타그램 변형을 카드뉴스 이미지로 자동 렌더링
   cardnews_brand: '@mediadot',      // 카드뉴스 하단 브랜드 핸들
   public_base_url: '',              // 이 서버의 외부 공개 URL — 인스타 API 업로드·외부 이미지 참조에 필요
+  default_image_url: '',            // 인스타그램 전역 대체 이미지 URL — 카드뉴스 자동 업로드 실패 시 단일 게시에 사용
 };
 
 function getSetting(key) {

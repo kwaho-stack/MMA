@@ -195,10 +195,15 @@ async function viewSettings(el) {
           <div class="hint">카드 상·하단에 표시되는 계정 핸들</div>
         </div>
       </div>
-      <div class="field" style="margin-bottom:0;">
+      <div class="field">
         <label>서버 공개 URL (public_base_url)</label>
         <input id="pub-url" value="${esc(s.public_base_url)}" placeholder="https://my-mediadot.example.com" />
         <div class="hint">인스타그램 API 업로드·블로그스팟/워드프레스 이미지 참조에는 외부 접근 가능한 이미지 URL이 필요합니다. 이 서버를 외부 공개(또는 터널링)한 주소를 입력하세요. 네이버·티스토리 브라우저 발행은 파일을 직접 업로드하므로 불필요.</div>
+      </div>
+      <div class="field" style="margin-bottom:0;">
+        <label>인스타그램 전역 대체 이미지 URL</label>
+        <input id="ig-fallback" value="${esc(s.default_image_url)}" placeholder="https://.../fallback.jpg" />
+        <div class="hint">서버 공개 URL이 없어 카드뉴스를 자동 업로드할 수 없을 때, 이 이미지 1장으로 대신 게시합니다. 공개 접근 가능한 https 이미지 주소여야 합니다(모든 인스타그램 계정 공통 · 계정별 대체 이미지 URL이 있으면 그쪽이 우선).</div>
       </div>
       <div class="variant-actions" style="margin-top:12px;">
         <button class="btn btn-sm" id="img-test" type="button">🎨 이미지 생성 테스트</button>
@@ -243,6 +248,7 @@ async function viewSettings(el) {
         cardnews_enabled: el.querySelector('#card-on').checked ? '1' : '0',
         cardnews_brand: el.querySelector('#card-brand').value.trim(),
         public_base_url: el.querySelector('#pub-url').value.trim(),
+        default_image_url: el.querySelector('#ig-fallback').value.trim(),
         revenue_sync_enabled: el.querySelector('#rs-on').checked ? '1' : '0',
         revenue_sync_time: el.querySelector('#rs-time').value.trim(),
         revenue_sync_days: el.querySelector('#rs-days').value,

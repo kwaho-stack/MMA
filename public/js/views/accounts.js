@@ -119,6 +119,7 @@ async function viewAccounts(el) {
       <div class="field">
         <label>${esc(f.label)}${f.required ? ' *' : ''}</label>
         <input data-cred="${f.key}" type="${f.secret ? 'password' : 'text'}" value="${esc(existing[f.key] || '')}" autocomplete="off" />
+        ${f.hint ? `<div class="hint">${esc(f.hint)}</div>` : ''}
       </div>`).join('');
     // 자격증명은 접어두어 모달을 미니멀하게 — 필수인데 비어 있으면 펼쳐서 안내
     return `
