@@ -33,9 +33,10 @@ async function browserLogin(account) {
   });
 }
 
-async function isLoggedIn(page) {
-  await page.goto('https://www.tistory.com/', { waitUntil: 'domcontentloaded' });
-  return page.evaluate(() => document.cookie.includes('TSSESSION'));
+// TSSESSION도 httpOnly라 document.cookie로는 안 보인다 → ctx.cookies()로 판별.
+async function isLoggedIn(ctx) {
+  const cookies = await ctx.cookies('https://www.tistory.com');
+  return cookies.some((c) => c.name === 'TSSESSION' && c.value);
 }
 
 async function login(page, creds) {
@@ -99,11 +100,11 @@ async function publish(account, variant) {
   const imgList = (extra.images || []).map((im) => ({ ...im, local: images.localPathOf(im.file) })).filter((im) => im.local);
   const blogHost = `${creds.blog_name}.tistory.com`;
 
-  return withAccountPage(account, async (page) => {
+  return withAccountPage(account, async (page, ctx) => {
     // "저장된 글이 있습니다" 등 confirm 대화상자는 새로 쓰기로 무시
     page.on('dialog', (d) => d.dismiss().catch(() => {}));
 
-    if (!(await isLoggedIn(page))) await login(page, creds);
+    if (!(await isLoggedIn(ctx))) await login(page, creds);
 
     await page.goto(`https://${blogHost}/manage/newpost/?type=post`, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);

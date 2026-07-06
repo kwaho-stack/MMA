@@ -13,9 +13,11 @@ function credsOf(account) {
   try { return JSON.parse(account.credentials || '{}'); } catch { return {}; }
 }
 
-async function isLoggedIn(page) {
-  await page.goto('https://www.naver.com', { waitUntil: 'domcontentloaded' });
-  return page.evaluate(() => document.cookie.includes('NID_AUT'));
+// 로그인 여부는 컨텍스트의 쿠키로 판별한다. NID_AUT는 httpOnly라
+// document.cookie(JS)로는 절대 안 보이므로, 반드시 ctx.cookies()로 확인해야 한다.
+async function isLoggedIn(ctx) {
+  const cookies = await ctx.cookies('https://www.naver.com');
+  return cookies.some((c) => c.name === 'NID_AUT' && c.value);
 }
 
 async function login(page, creds) {
@@ -165,8 +167,8 @@ async function publish(account, variant) {
   const extra = (() => { try { return JSON.parse(variant.extra || '{}'); } catch { return {}; } })();
   const imgList = (extra.images || []).map((im) => ({ ...im, local: images.localPathOf(im.file) })).filter((im) => im.local);
 
-  return withAccountPage(account, async (page) => {
-    if (!(await isLoggedIn(page))) await login(page, creds);
+  return withAccountPage(account, async (page, ctx) => {
+    if (!(await isLoggedIn(ctx))) await login(page, creds);
 
     // 글쓰기 진입
     await page.goto(`https://blog.naver.com/${encodeURIComponent(creds.naver_id)}?Redirect=Write&`, { waitUntil: 'domcontentloaded' });
