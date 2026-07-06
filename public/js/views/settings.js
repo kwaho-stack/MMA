@@ -115,6 +115,11 @@ async function viewSettings(el) {
           ${['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5'].map((m) => `<option value="${m}" ${s.llm_model === m ? 'selected' : ''}>${m}${m === 'claude-opus-4-8' ? ' (권장 — 최고 품질)' : m === 'claude-sonnet-5' ? ' (균형)' : ' (저비용·고속)'}</option>`).join('')}
         </select>
       </div>
+      <div class="field" style="display:flex; align-items:center; gap:10px;">
+        <label class="switch"><input type="checkbox" id="deai" ${s.deai_selfcritique !== '0' ? 'checked' : ''} /><span class="track"></span></label>
+        <div><b style="font-size:13px;">AI 느낌 제거 (자기비평 2단 생성)</b>
+        <div class="hint">마스터 원고 초안을 AI 느낌 점수로 자동 점검하고, 높으면 구체성·리듬을 살려 한 번 더 고쳐 씁니다. 원고당 토큰이 약 2배 들지만 사람 냄새가 확 올라갑니다. 끄면 초안 1회로 끝냅니다.</div></div>
+      </div>
       <div class="field-row" style="margin-bottom:0;">
         <div class="field" style="margin-bottom:0;">
           <label>GitHub Copilot ${s.copilot?.connected ? `<span class="badge badge-ok">연결됨${s.copilot.user ? ` — @${esc(s.copilot.user)}` : ''}</span>` : '<span class="badge badge-warn">미연결</span>'}</label>
@@ -237,6 +242,7 @@ async function viewSettings(el) {
         simulate_publish: el.querySelector('#sim').checked ? '1' : '0',
         anthropic_api_key: el.querySelector('#api-key').value.trim(),
         llm_model: el.querySelector('#model').value,
+        deai_selfcritique: el.querySelector('#deai').checked ? '1' : '0',
         llm_provider: el.querySelector('#llm-provider').value,
         copilot_model: el.querySelector('#copilot-model').value.trim() || 'gpt-4o',
         google_client_id: el.querySelector('#g-client-id').value.trim(),

@@ -7,6 +7,7 @@ const { getSetting } = require('./db');
 const copilot = require('./copilot');
 const gemini = require('./gemini');
 const guidelines = require('./guidelines');
+const aiTells = require('./ai-tells');
 
 const PROVIDER_ORDER = ['anthropic', 'copilot', 'google'];
 
@@ -159,26 +160,62 @@ const MASTER_SCHEMA = {
 
 async function generateMaster(topic, category) {
   const guide = guidelines.masterGuide();
-  const result = await jsonRequest({
-    system: [
-      '당신은 한국어 콘텐츠 전문 작가입니다. 검색 유입과 광고 수익을 목표로 하는 정보성 원고를 씁니다.',
-      '원칙:',
-      guide.base,
-      guide.custom ? `\n[운영자 추가 지침 — 반드시 반영]\n${guide.custom}` : '',
-    ].filter(Boolean).join('\n'),
-    prompt: [
-      `주제: ${topic.title}`,
-      `핵심 키워드: ${topic.keywords || '-'}`,
-      `다룰 관점: ${topic.angle || '-'}`,
-      `카테고리: ${category ? category.name : '-'}`,
-      '',
-      '위 주제로 마스터 원고를 작성하세요. 이 원고는 이후 플랫폼별(블로그·SNS·숏폼)로 리라이팅되는 원본입니다.',
-      '- body는 마크다운, 소제목(##) 4~6개, 전체 2000자 이상',
-      '- summary는 2문장 요약',
-      '- tags는 관련 태그 8~12개',
-    ].join('\n'),
-    schema: MASTER_SCHEMA,
-  });
+  const system = [
+    '당신은 발로 뛰며 취재해 글을 쓰는 한국의 프리랜서 정보 콘텐츠 작가입니다.',
+    '당신이 쓰는 초고는 "AI가 뽑아낸 매끈한 글"이 아니라, 실제 경험과 구체적 사실이 꽉 찬 취재 원본이어야 합니다.',
+    '이 원고는 이후 플랫폼별(블로그·SNS·숏폼)로 리라이팅됩니다. 그러니 특정 매체 문체로 굳히지 말고, 사실·구체·리듬이 살아있는 중립적 초고를 쓰세요.',
+    '',
+    '원칙:',
+    guide.base,
+    guide.custom ? `\n[운영자 추가 지침 — 반드시 반영]\n${guide.custom}` : '',
+  ].filter(Boolean).join('\n');
+  const prompt = [
+    `주제: ${topic.title}`,
+    `핵심 키워드: ${topic.keywords || '-'}`,
+    `다룰 관점: ${topic.angle || '-'}`,
+    `카테고리: ${category ? category.name : '-'}`,
+    '',
+    '위 주제로 마스터 원고를 작성하세요.',
+    '- body는 마크다운, 소제목(##) 4~6개, 전체 2000자 이상',
+    '- summary는 2문장 요약',
+    '- tags는 관련 태그 8~12개',
+  ].join('\n');
+
+  let result = await jsonRequest({ system, prompt, schema: MASTER_SCHEMA });
+
+  // 자기비평 패스(2단 생성) — AI 느낌 점수가 높으면 구체적 지적과 함께 1회 개정.
+  // 실제 모델 응답일 때만 수행(데모 폴백엔 의미 없음), 설정으로 끌 수 있음.
+  if (result && getSetting('deai_selfcritique') !== '0') {
+    try {
+      const crit = aiTells.critiqueNotes(result.body);
+      if (crit.score >= 30 && crit.notes) {
+        const revised = await jsonRequest({
+          system,
+          prompt: [
+            '아래는 당신이 방금 쓴 초고입니다. 자동 검사에서 AI가 쓴 티가 나는 부분이 발견됐습니다.',
+            '',
+            `[제목]\n${result.title}`,
+            `[본문]\n${result.body}`,
+            '',
+            `[반드시 해소할 지점 — AI 느낌 점수 ${crit.score}/100]`,
+            crit.notes,
+            '',
+            '지시: 정보량·사실·구조는 유지하되, 위 지적을 전부 해소해 다시 쓰세요.',
+            '- 정형 서두/마무리구는 삭제하고, 구체적 장면·수치·질문으로 시작하고 맺으세요.',
+            '- 접속어·공허 형용사를 덜어내고, 막연한 일반화 문장은 구체적 사례·수치로 바꾸세요.',
+            '- 문장 길이를 들쭉날쭉하게, 짧은 문장을 섞어 리듬을 주세요.',
+            'summary·tags도 함께 다시 정리하세요.',
+          ].join('\n'),
+          schema: MASTER_SCHEMA,
+        });
+        // 개선됐을 때만 채택(더 나빠지면 원본 유지).
+        if (revised && revised.body && aiTells.score(revised.body).score <= crit.score) {
+          result = revised;
+        }
+      }
+    } catch { /* 자기비평 실패는 치명적이지 않음 — 초안 그대로 사용 */ }
+  }
+
   if (result) return result;
 
   // 데모 폴백

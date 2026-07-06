@@ -159,6 +159,7 @@ const DEFAULT_SETTINGS = {
   cardnews_brand: '@mediadot',      // 카드뉴스 하단 브랜드 핸들
   public_base_url: '',              // 이 서버의 외부 공개 URL — 인스타 API 업로드·외부 이미지 참조에 필요
   default_image_url: '',            // 인스타그램 전역 대체 이미지 URL — 카드뉴스 자동 업로드 실패 시 단일 게시에 사용
+  deai_selfcritique: '1',           // 마스터 원고 자기비평 2단 생성(AI 느낌 제거) on/off — 끄면 토큰 절약
 };
 
 function getSetting(key) {
