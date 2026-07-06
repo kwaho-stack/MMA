@@ -158,7 +158,7 @@ const MASTER_SCHEMA = {
   additionalProperties: false,
 };
 
-async function generateMaster(topic, category) {
+async function generateMaster(topic, category, { stages = false } = {}) {
   const guide = guidelines.masterGuide();
   const system = [
     '당신은 발로 뛰며 취재해 글을 쓰는 한국의 프리랜서 정보 콘텐츠 작가입니다.',
@@ -182,12 +182,15 @@ async function generateMaster(topic, category) {
   ].join('\n');
 
   let result = await jsonRequest({ system, prompt, schema: MASTER_SCHEMA });
+  const stageInfo = { selfcritique: getSetting('deai_selfcritique') !== '0', draft: null, draftScore: null, revisedScore: null, applied: false };
 
   // 자기비평 패스(2단 생성) — AI 느낌 점수가 높으면 구체적 지적과 함께 1회 개정.
   // 실제 모델 응답일 때만 수행(데모 폴백엔 의미 없음), 설정으로 끌 수 있음.
   if (result && getSetting('deai_selfcritique') !== '0') {
     try {
       const crit = aiTells.critiqueNotes(result.body);
+      stageInfo.draft = stages ? { title: result.title, body: result.body } : null;
+      stageInfo.draftScore = crit.score;
       if (crit.score >= 30 && crit.notes) {
         const revised = await jsonRequest({
           system,
@@ -209,14 +212,19 @@ async function generateMaster(topic, category) {
           schema: MASTER_SCHEMA,
         });
         // 개선됐을 때만 채택(더 나빠지면 원본 유지).
-        if (revised && revised.body && aiTells.score(revised.body).score <= crit.score) {
-          result = revised;
+        if (revised && revised.body) {
+          const rScore = aiTells.score(revised.body).score;
+          stageInfo.revisedScore = rScore;
+          if (rScore <= crit.score) { result = revised; stageInfo.applied = true; }
         }
       }
     } catch { /* 자기비평 실패는 치명적이지 않음 — 초안 그대로 사용 */ }
   }
 
-  if (result) return result;
+  if (result) {
+    if (stages) result._stages = stageInfo;
+    return result;
+  }
 
   // 데모 폴백
   return {

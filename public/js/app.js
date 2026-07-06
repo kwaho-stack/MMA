@@ -7,6 +7,7 @@ const ROUTES = {
   '/accounts': viewAccounts,
   '/categories': viewCategories,
   '/guidelines': viewGuidelines,
+  '/lab': viewLab,
   '/revenue': viewRevenue,
   '/settings': viewSettings,
 };

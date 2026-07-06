@@ -347,3 +347,55 @@ details.adv:hover > summary { color: var(--text); }
 .extra-line { font-size: 12px; padding: 7px 10px; border-radius: 6px; background: var(--surface); border: 1px solid var(--grid); display: flex; gap: 8px; align-items: baseline; }
 .extra-line .xk { color: var(--muted); font-size: 11px; font-weight: 700; white-space: nowrap; }
 .extra-line .xv { color: var(--text-2); flex: 1; }
+
+/* ── 리라이팅 랩 (미리보기·평가 하네스) ───────────────────────────────── */
+.lab-grid { display: grid; grid-template-columns: 340px 1fr; gap: 16px; align-items: start; }
+.lab-controls { position: sticky; top: 16px; }
+.lab-result { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.lab-loading, .lab-clean { padding: 22px; text-align: center; color: var(--muted); font-size: 13px; }
+.lab-clean { color: var(--good); }
+.lab-res-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+
+/* AI 느낌 미터 */
+.ai-meter { display: flex; align-items: center; gap: 16px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--grid); border-radius: 10px; margin-bottom: 12px; }
+.ai-num { font-size: 40px; font-weight: 800; line-height: 1; letter-spacing: -1px; }
+.ai-num span { font-size: 15px; font-weight: 600; color: var(--muted); }
+.ai-meta { flex: 1; min-width: 0; }
+.ai-verdict { font-size: 14px; font-weight: 700; }
+.ai-sub { font-size: 11.5px; color: var(--muted); margin: 1px 0 7px; }
+.ai-track { height: 7px; border-radius: 4px; background: var(--grid); overflow: hidden; }
+.ai-fill { height: 100%; border-radius: 4px; transition: width .4s ease; }
+
+/* 자기비평 스테이지 라인 */
+.stage-line { font-size: 12.5px; padding: 7px 11px; border-radius: 7px; background: var(--surface); border: 1px solid var(--grid); color: var(--text-2); margin-bottom: 10px; }
+.stage-ok { border-color: rgba(12,163,12,.4); }
+.stage-warn { border-color: rgba(250,178,25,.4); }
+.stage-demo { border-color: rgba(250,178,25,.4); color: var(--warning); }
+
+/* 신호 근거 */
+.sig-list { display: flex; flex-direction: column; gap: 9px; margin-bottom: 12px; }
+.sig-head { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 3px; }
+.sig-head span:first-child { color: var(--text-2); font-weight: 600; }
+.sig-pct { font-weight: 700; }
+.sig-track { height: 5px; border-radius: 3px; background: var(--grid); overflow: hidden; }
+.sig-fill { height: 100%; border-radius: 3px; }
+.sig-hits { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.sig-detail { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.chip { display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 5px; background: var(--grid); color: var(--text-2); }
+
+/* 원고 본문 */
+.lab-metrics { font-size: 11.5px; color: var(--muted); margin-bottom: 10px; }
+.lab-doc { border-top: 1px solid var(--grid); padding-top: 12px; }
+.lab-doc-title { font-size: 17px; font-weight: 700; line-height: 1.4; margin-bottom: 6px; }
+.lab-summary { font-size: 12.5px; color: var(--muted); font-style: italic; margin-bottom: 10px; }
+.lab-content { font-size: 13.5px; line-height: 1.75; color: var(--text-2); max-height: 460px; overflow-y: auto; padding-right: 6px; }
+.lab-content .lab-h { color: var(--text); font-size: 14.5px; font-weight: 700; margin: 14px 0 6px; }
+.lab-content p { margin: 0 0 10px; }
+.lab-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; }
+.lab-extra { font-size: 12.5px; color: var(--text-2); background: var(--surface); border: 1px solid var(--grid); border-radius: 6px; padding: 7px 10px; margin-top: 6px; }
+.lab-extra b { color: var(--muted); font-size: 11px; margin-right: 6px; }
+
+@media (max-width: 900px) {
+  .lab-grid { grid-template-columns: 1fr; }
+  .lab-controls { position: static; }
+}

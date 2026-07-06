@@ -15,6 +15,7 @@ const guidelines = require('./guidelines');
 const accountsIO = require('./accounts-io');
 const preflight = require('./preflight');
 const dedup = require('./topic-dedup');
+const aiTells = require('./ai-tells');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -549,6 +550,43 @@ app.put('/api/guidelines/:platform', wrap(async (req, res) => {
 app.delete('/api/guidelines/:platform', wrap(async (req, res) => {
   guidelines.reset(req.params.platform);
   res.json({ ok: true });
+}));
+
+// ---------- 리라이팅 랩 (미리보기·평가) ----------
+// 발행/저장 없이 주제 → 마스터 원고(+선택 플랫폼 리라이팅)를 생성하고 AI 느낌 점수를 매긴다.
+app.post('/api/lab/preview', wrap(async (req, res) => {
+  const { title, keywords = '', angle = '', category_id = null, platform = '_master' } = req.body || {};
+  if (!title || !String(title).trim()) throw new Error('주제(제목)를 입력하세요.');
+  if (platform !== '_master' && !MEDIA_PLATFORMS[platform]) throw new Error('알 수 없는 플랫폼입니다.');
+
+  const category = category_id ? db.prepare('SELECT * FROM categories WHERE id = ?').get(category_id) : null;
+  const topic = { title: String(title).trim(), keywords: String(keywords || ''), angle: String(angle || '') };
+
+  const master = await llm.generateMaster(topic, category, { stages: true });
+  const masterAI = aiTells.score(master.body);
+  const out = {
+    engine: llm.engineInfo(),
+    demo: Boolean(master._demo),
+    master: {
+      title: master.title, summary: master.summary, body: master.body, tags: master.tags || [],
+      ai: masterAI,
+      stages: master._stages || null,
+    },
+  };
+
+  if (platform !== '_master') {
+    const def = MEDIA_PLATFORMS[platform];
+    const rw = await llm.rewriteForPlatform(master, platform, def, { name: '미리보기' }, { ads: [] });
+    out.rewrite = {
+      platform, platform_name: def.name, kind: def.kind,
+      title: rw.title, body: rw.body, hashtags: rw.hashtags || [], caption: rw.caption || '',
+      cta: rw.cta || '', pinned_comment: rw.pinned_comment || '', ad_snippet: rw.ad_snippet || '', notes: rw.notes || '',
+      demo: Boolean(rw._demo),
+      ai: aiTells.score(rw.body),
+    };
+  }
+
+  res.json(out);
 }));
 
 // ---------- 활동 로그 ----------
