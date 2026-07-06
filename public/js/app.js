@@ -3,6 +3,7 @@
 const ROUTES = {
   '/': viewDashboard,
   '/studio': viewStudio,
+  '/photo': viewPhotoBlog,
   '/queue': viewQueue,
   '/accounts': viewAccounts,
   '/categories': viewCategories,

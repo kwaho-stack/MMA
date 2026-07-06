@@ -351,6 +351,33 @@ app.post('/api/pipeline/run', wrap(async (req, res) => {
   res.json({ content_id: contentId });
 }));
 
+// ---------- 포토 오토 블로깅 ----------
+// 사진 1장 업로드 — 바이너리 본문(image/*)을 받아 data/uploads에 저장하고 웹 경로를 돌려준다.
+app.post('/api/photos/upload',
+  express.raw({ type: ['image/*', 'application/octet-stream'], limit: '25mb' }),
+  wrap(async (req, res) => {
+    const buf = req.body;
+    if (!buf || !buf.length) throw new Error('이미지 데이터가 비어 있습니다.');
+    const saved = images.saveUpload(buf, req.headers['content-type'] || 'image/png');
+    res.json(saved);
+  }));
+
+// 주제 + 사진(설명 포함)으로 방문 후기 콘텐츠를 생성해 발행 큐로 보낸다.
+app.post('/api/photo-blog', wrap(async (req, res) => {
+  const { title, keywords = '', angle = '', category_id, account_ids = null, mode = null, photos = [] } = req.body;
+  if (!title || !title.trim()) throw new Error('제목(주제)을 입력하세요.');
+  if (!category_id) throw new Error('카테고리를 선택하세요.');
+  const clean = (Array.isArray(photos) ? photos : [])
+    .filter((p) => p && p.file)
+    .map((p) => ({ file: String(p.file), caption: String(p.caption || '') }));
+  if (!clean.length) throw new Error('사진을 1장 이상 첨부하세요.');
+  const contentId = await runPipeline({
+    categoryId: category_id, accountIds: account_ids, mode,
+    photos: clean, photoTopic: { title: title.trim(), keywords, angle },
+  });
+  res.json({ content_id: contentId });
+}));
+
 // ---------- 콘텐츠 ----------
 app.get('/api/contents', wrap(async (req, res) => {
   const rows = db.prepare(

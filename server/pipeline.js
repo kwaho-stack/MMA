@@ -63,9 +63,10 @@ function scheduleSlots(count) {
  * 파이프라인 실행. topicId가 없으면 풀에서 꺼내고, 풀도 비었으면 LLM으로 주제를 생성한다.
  * @returns {Promise<number>} content id
  */
-async function runPipeline({ categoryId, topicId = null, accountIds = null, mode = null }) {
+async function runPipeline({ categoryId, topicId = null, accountIds = null, mode = null, photos = null, photoTopic = null }) {
   const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(categoryId);
   if (!category) throw new Error('카테고리를 찾을 수 없습니다.');
+  const photoMode = Array.isArray(photos) && photos.length > 0;
 
   // 대상 계정: 카테고리에 연결된 활성 미디어 계정
   let accounts = db.prepare('SELECT * FROM media_accounts WHERE category_id = ? AND active = 1').all(categoryId);
@@ -75,9 +76,14 @@ async function runPipeline({ categoryId, topicId = null, accountIds = null, mode
   }
   if (!accounts.length) throw new Error(`'${category.name}' 카테고리에 연결된 활성 미디어 계정이 없습니다. 계정 관리에서 계정을 등록하고 카테고리를 지정하세요.`);
 
-  // 1) 주제 선정
+  // 1) 주제 선정 — 포토 모드는 사용자가 준 제목으로 즉석 주제를 만든다(풀에서 꺼내지 않음).
   let topic = null;
-  if (topicId) {
+  if (photoMode) {
+    if (!photoTopic || !photoTopic.title) throw new Error('포토 블로깅에는 제목(주제)이 필요합니다.');
+    const r = db.prepare('INSERT INTO topics(category_id, title, keywords, angle, source) VALUES(?,?,?,?,?)')
+      .run(categoryId, photoTopic.title, photoTopic.keywords || '', photoTopic.angle || '', 'photo');
+    topic = db.prepare('SELECT * FROM topics WHERE id = ?').get(Number(r.lastInsertRowid));
+  } else if (topicId) {
     topic = db.prepare('SELECT * FROM topics WHERE id = ?').get(topicId);
   } else {
     topic = db.prepare(`SELECT * FROM topics WHERE category_id = ? AND status = 'pool' ORDER BY id LIMIT 1`).get(categoryId);
@@ -111,8 +117,10 @@ async function runPipeline({ categoryId, topicId = null, accountIds = null, mode
   // 이후 단계는 비동기 진행 — 호출자는 contentId로 진행 상황을 폴링한다.
   (async () => {
     try {
-      // 3) 마스터 원고 생성
-      const master = await llm.generateMaster(topic, category);
+      // 3) 마스터 원고 생성 (포토 모드는 사진+설명으로 방문 후기 생성)
+      const master = photoMode
+        ? await llm.generateMasterFromPhotos(topic, category, photos)
+        : await llm.generateMaster(topic, category);
       setProgress(contentId, { stage: 'policy' });
       const policy = checkPolicy(`${master.title}\n${master.body}`);
       touchContent(contentId, {
@@ -148,6 +156,7 @@ async function runPipeline({ categoryId, topicId = null, accountIds = null, mode
         try {
           const rw = await llm.rewriteForPlatform(master, account.platform, def, account, {
             ads: matchedAdsOf(account.id),
+            photos: photoMode ? photos : null,
           });
           const vPolicy = checkPolicy(`${rw.title}\n${rw.body}`);
           const extraObj = {
@@ -156,29 +165,42 @@ async function runPipeline({ categoryId, topicId = null, accountIds = null, mode
             policy: vPolicy, demo: Boolean(rw._demo),
           };
 
-          // 블로그: [이미지: …] 마커 위치에 넣을 삽화를 Gemini로 생성 (키 없으면 건너뜀)
-          if (def.kind === 'blog' && images.enabled()) {
-            try {
-              const prep = await images.prepareBodyImages(rw.body, `c${contentId}a${account.id}`);
-              if (prep.images.length) {
-                extraObj.images = prep.images;
-                log('pipeline', `본문 삽화 ${prep.images.length}장 생성 — ${def.name}/${account.name}`, { contentId });
-              }
-            } catch (e) {
-              log('warn', `삽화 생성 실패(${account.name}): ${e.message} — 이미지 없이 진행`, { contentId });
+          if (photoMode) {
+            // 포토 모드: 사용자가 올린 실제 사진을 본문 [[PHOTO]] 자리에 순서대로 배치(Gemini 생성 안 함)
+            if (def.kind === 'blog') {
+              const applied = images.applyPhotos(rw.body, photos);
+              rw.body = applied.body;
+              extraObj.images = applied.images;
+              log('pipeline', `첨부 사진 ${applied.images.length}장 배치 — ${def.name}/${account.name}`, { contentId });
+            } else {
+              rw.body = String(rw.body || '').replace(/\[\[\s*photo\s*\]\]/ig, '').trim();
+              if (account.platform === 'instagram') extraObj.cards = photos.map((ph) => ph.file); // 캐러셀 = 실제 사진
             }
-          }
+          } else {
+            // 블로그: [이미지: …] 마커 위치에 넣을 삽화를 Gemini로 생성 (키 없으면 건너뜀)
+            if (def.kind === 'blog' && images.enabled()) {
+              try {
+                const prep = await images.prepareBodyImages(rw.body, `c${contentId}a${account.id}`);
+                if (prep.images.length) {
+                  extraObj.images = prep.images;
+                  log('pipeline', `본문 삽화 ${prep.images.length}장 생성 — ${def.name}/${account.name}`, { contentId });
+                }
+              } catch (e) {
+                log('warn', `삽화 생성 실패(${account.name}): ${e.message} — 이미지 없이 진행`, { contentId });
+              }
+            }
 
-          // 인스타그램: 카드뉴스 이미지 자동 렌더링 (1080×1080 캐러셀)
-          if (account.platform === 'instagram' && getSetting('cardnews_enabled') === '1') {
-            try {
-              extraObj.cards = await cardnews.buildForVariant(
-                { title: rw.title, body: rw.body },
-                { accent: category.color || '#3987e5', tag: `c${contentId}a${account.id}` },
-              );
-              log('pipeline', `카드뉴스 ${extraObj.cards.length}장 렌더링 — ${account.name}`, { contentId });
-            } catch (e) {
-              log('warn', `카드뉴스 렌더링 실패(${account.name}): ${e.message} — 텍스트만 진행`, { contentId });
+            // 인스타그램: 카드뉴스 이미지 자동 렌더링 (1080×1080 캐러셀)
+            if (account.platform === 'instagram' && getSetting('cardnews_enabled') === '1') {
+              try {
+                extraObj.cards = await cardnews.buildForVariant(
+                  { title: rw.title, body: rw.body },
+                  { accent: category.color || '#3987e5', tag: `c${contentId}a${account.id}` },
+                );
+                log('pipeline', `카드뉴스 ${extraObj.cards.length}장 렌더링 — ${account.name}`, { contentId });
+              } catch (e) {
+                log('warn', `카드뉴스 렌더링 실패(${account.name}): ${e.message} — 텍스트만 진행`, { contentId });
+              }
             }
           }
 

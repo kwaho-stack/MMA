@@ -317,6 +317,62 @@ async function generateMaster(topic, category, { stages = false } = {}) {
   });
 }
 
+// ---------- 사진 기반 마스터 원고(포토 오토 블로깅) ----------
+
+/**
+ * 첨부 사진 + 사진별 설명으로 방문 후기형 마스터 원고를 생성한다.
+ * 사진 자리에는 [[PHOTO]] 자리표시자를 순서대로 넣어, 발행 시 실제 사진이 그 위치에 삽입된다.
+ * @param {{title:string, keywords?:string, angle?:string}} topic
+ * @param {object} category
+ * @param {Array<{caption:string}>} photos 순서 있는 사진 설명
+ */
+async function generateMasterFromPhotos(topic, category, photos) {
+  const guide = guidelines.masterGuide();
+  const photoList = photos.map((p, i) => `${i + 1}. ${p.caption || '(설명 없음)'}`).join('\n');
+  const system = [
+    '당신은 직접 다녀온 장소·여행·맛집을 생생하게 기록하는 한국의 블로거입니다.',
+    '독자가 "나도 가보고 싶다"고 느끼도록, 첨부된 사진과 현장 경험을 살려 진짜 방문 후기처럼 씁니다.',
+    '원칙:',
+    guide.base,
+    guide.custom ? `\n[운영자 추가 지침 — 반드시 반영]\n${guide.custom}` : '',
+  ].filter(Boolean).join('\n');
+  const prompt = [
+    `주제/장소: ${topic.title}`,
+    topic.keywords ? `키워드: ${topic.keywords}` : '',
+    topic.angle ? `관점: ${topic.angle}` : '',
+    `카테고리: ${category ? category.name : '-'}`,
+    '',
+    `첨부된 사진 ${photos.length}장과 각 사진 설명(순서대로):`,
+    photoList,
+    '',
+    CLICKBAIT_TITLE,
+    '',
+    '위 사진들을 순서대로 활용해 방문 후기 블로그 글을 쓰세요.',
+    `- 사진이 들어갈 자리에 정확히 [[PHOTO]] 라고 표기하세요. [[PHOTO]]는 사진 순서대로 총 ${photos.length}번, 각 사진 설명에 해당하는 문단 근처에 넣습니다.`,
+    '- 각 사진 앞뒤로 그 사진에 대한 구체적 묘사·현장 경험·꿀팁을 2~4문장 쓰세요(설명을 그대로 베끼지 말고 확장).',
+    '- #·##·**·__ 같은 마크다운 기호는 쓰지 마세요(소제목은 짧은 문장 줄로).',
+    '- 도입은 방문 계기와 첫인상, 마무리는 총평 + 추천 대상 + 독자에게 묻는 질문 1개로.',
+    '- body는 전체 1,200자 이상, summary는 2문장, tags는 장소·지역·메뉴 등 관련 태그 8~12개.',
+  ].filter(Boolean).join('\n');
+
+  const result = await jsonRequest({ system, prompt, schema: MASTER_SCHEMA });
+  if (result) return cleanContent(result);
+
+  // 데모 폴백 — 사진 설명을 엮어 자리표시자와 함께 배치
+  return cleanContent({
+    title: topic.title,
+    summary: `${topic.title} 방문 후기입니다. Anthropic API 키를 등록하면 사진을 활용한 실제 후기가 생성됩니다.`,
+    body: [
+      `${topic.title}에 다녀왔습니다.`,
+      '',
+      ...photos.flatMap((p, i) => [`${p.caption || `사진 ${i + 1}`}`, '[[PHOTO]]', '']),
+      '전체적으로 만족스러운 방문이었습니다. 여러분은 어디가 가장 궁금하신가요?',
+    ].join('\n'),
+    tags: (topic.keywords || category?.name || '방문후기').split(',').map((s) => s.trim()).filter(Boolean),
+    _demo: true,
+  });
+}
+
 // ---------- 플랫폼별 리라이팅 ----------
 
 const REWRITE_SCHEMA = {
@@ -442,10 +498,11 @@ async function guidedRefine(draft, { system, masterBlock, platformDef, profile }
   return draft;
 }
 
-async function rewriteForPlatform(master, platformKey, platformDef, account, { ads = [] } = {}) {
+async function rewriteForPlatform(master, platformKey, platformDef, account, { ads = [], photos = null } = {}) {
   // 지침 탭에서 수정한 프로파일이 있으면 그것을 사용한다.
   const p = guidelines.profileFor(platformKey) || platformDef.rewriteProfile;
   const isBlog = platformDef.kind === 'blog';
+  const photoMode = Array.isArray(photos) && photos.length > 0;
   const system = [
     '당신은 각 플랫폼의 알고리즘과 이용자 소비 성향을 꿰뚫는 전문 카피라이터입니다. 하나의 원고를 플랫폼별로 완전히 다른 글로 재창작합니다.',
     '리라이팅 원칙(중복 콘텐츠·저품질 판정 방지):',
@@ -457,7 +514,15 @@ async function rewriteForPlatform(master, platformKey, platformDef, account, { a
   ].join('\n');
 
   // 공유 블록(마스터 원고) — 한 콘텐츠의 여러 플랫폼 리라이팅이 동일하므로 프롬프트 캐싱으로 재사용한다.
-  const masterBlock = [`[원본 원고]`, `제목: ${master.title}`, `본문:\n${master.body}`].join('\n');
+  const photoBlock = photoMode
+    ? `\n\n[첨부 사진 ${photos.length}장 — 순서대로]\n${photos.map((ph, i) => `${i + 1}. ${ph.caption || '(설명 없음)'}`).join('\n')}`
+    : '';
+  const masterBlock = [`[원본 원고]`, `제목: ${master.title}`, `본문:\n${master.body}`, photoBlock].join('\n');
+
+  // 사진 모드: Gemini 삽화 대신 사용자가 올린 실제 사진을 [[PHOTO]] 자리에 순서대로 넣는다.
+  const imageInstr = photoMode
+    ? `- 본문에 첨부 사진을 넣습니다. 사진이 들어갈 자리에 정확히 [[PHOTO]] 라고만 표기하고, 사진 순서대로 총 ${photos.length}번 배치하세요(각 사진 설명에 맞는 문단 근처). [이미지: …] 형태의 마커나 다른 이미지 표기는 절대 쓰지 마세요.`
+    : (isBlog ? '- 본문 중간에 어울리는 삽화 위치를 [이미지: 장면을 구체적으로 묘사] 형식으로 2~3곳 표시하세요(이미지가 자동 생성되어 삽입됩니다).' : '');
 
   const buildInstr = (retryNote) => [
     `[타깃 플랫폼] ${platformDef.name} (계정: ${account.name})`,
@@ -476,7 +541,7 @@ async function rewriteForPlatform(master, platformKey, platformDef, account, { a
     CLICKBAIT_TITLE,
     '- 본문에는 #·##·**·__ 같은 마크다운 기호를 쓰지 마세요(소제목은 짧은 문장 줄로).',
     '',
-    isBlog ? '- 본문 중간에 어울리는 삽화 위치를 [이미지: 장면을 구체적으로 묘사] 형식으로 2~3곳 표시하세요(이미지가 자동 생성되어 삽입됩니다).' : '',
+    imageInstr,
     '- title: 이 플랫폼용 제목(원본 제목과 다르게, 위 어그로 지침을 반드시 적용)',
     '- body: 본문(형식이 cards면 카드별로 "=== 카드 N ===" 구분, thread면 "=== 포스트 N ===" 구분, script면 장면 지시 포함 대본)',
     '- hashtags: SNS/숏폼이면 맥락에 맞는 해시태그(SNS는 3~5개만), 블로그면 태그 목록',
@@ -508,7 +573,7 @@ async function rewriteForPlatform(master, platformKey, platformDef, account, { a
   // 데모 폴백 — 프로파일 구조만 흉내낸 자리표시 원고
   return {
     title: `[데모·${platformDef.name}] ${master.title.replace(/^\[데모\]\s*/, '')}`,
-    body: `(${platformDef.name} 전용 데모 리라이팅)\n\n${master.summary}\n\n형식: ${p.format} / 분량: ${p.length}\n실제 운영 시 프로파일(${p.tone.slice(0, 40)}…)에 맞춘 재창작 원고가 생성됩니다.`,
+    body: `(${platformDef.name} 전용 데모 리라이팅)\n\n${master.summary}\n\n형식: ${p.format} / 분량: ${p.length}\n실제 운영 시 프로파일(${p.tone.slice(0, 40)}…)에 맞춘 재창작 원고가 생성됩니다.${photoMode ? `\n\n${photos.map(() => '[[PHOTO]]').join('\n\n')}` : ''}`,
     hashtags: (master.tags || []).slice(0, 5),
     caption: master.summary,
     cta: platformDef.kind === 'blog' ? '' : '(데모) 프로필 링크에서 더 보기',
@@ -537,4 +602,4 @@ function engineInfo() {
   return { ready: provider !== null, provider, label };
 }
 
-module.exports = { generateTopics, generateMaster, rewriteForPlatform, hasApiKey, engineInfo };
+module.exports = { generateTopics, generateMaster, generateMasterFromPhotos, rewriteForPlatform, hasApiKey, engineInfo };

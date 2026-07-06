@@ -108,4 +108,43 @@ function localPathOf(webPath) {
   return fs.existsSync(p) ? p : null;
 }
 
-module.exports = { enabled, hasKey, generateImage, prepareBodyImages, bodyWithImageTags, localPathOf, MARKER_RE, UPLOAD_DIR };
+/** 사용자가 업로드한 사진(버퍼)을 저장하고 웹 경로를 반환한다 — 포토 오토 블로깅용. */
+function saveUpload(buffer, mime = 'image/png') {
+  const ext = /jpe?g/i.test(mime) ? 'jpg' : /webp/i.test(mime) ? 'webp' : /gif/i.test(mime) ? 'gif' : 'png';
+  const name = `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  fs.writeFileSync(path.join(UPLOAD_DIR, name), buffer);
+  return { file: `/uploads/${name}` };
+}
+
+// 사진 자리표시자 — 원고 생성/리라이팅이 사진 넣을 위치에 남기는 토큰.
+const PHOTO_PLACEHOLDER_RE = /\[\[\s*photo\s*\]\]/ig;
+
+/**
+ * 본문의 [[PHOTO]] 자리표시자를 순서대로 실제 사진 마커([사진: 설명])로 치환하고,
+ * 발행 시 삽입할 이미지 목록을 만든다. 자리표시자가 사진보다 적으면 남은 사진을 본문 끝에 덧붙인다.
+ * @param {string} body 자리표시자가 든 본문
+ * @param {Array<{file:string, caption:string}>} photos 순서 있는 사진 목록
+ * @returns {{body:string, images:Array<{file,prompt,marker}>}}
+ */
+function applyPhotos(body, photos) {
+  const images = [];
+  let idx = 0;
+  const mk = (p, i) => {
+    const cap = String(p.caption || '').replace(/[\]\n]/g, ' ').trim();
+    const marker = `[사진: ${cap || `사진 ${i + 1}`}]`;
+    images.push({ file: p.file, prompt: cap, marker });
+    return marker;
+  };
+  let text = String(body || '').replace(PHOTO_PLACEHOLDER_RE, () => {
+    const p = photos[idx];
+    if (!p) return ''; // 자리표시자가 사진보다 많으면 제거
+    return mk(p, idx++);
+  });
+  for (; idx < photos.length; idx++) { // 자리표시자가 부족하면 남은 사진을 끝에 배치
+    const p = photos[idx];
+    text += `\n\n${mk(p, idx)}`;
+  }
+  return { body: text, images };
+}
+
+module.exports = { enabled, hasKey, generateImage, prepareBodyImages, bodyWithImageTags, localPathOf, saveUpload, applyPhotos, MARKER_RE, UPLOAD_DIR };
