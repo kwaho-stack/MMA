@@ -272,4 +272,18 @@ async function browserLogin(platformKey, account) {
   return mod.browserLogin(account);
 }
 
-module.exports = { publish, hasRequiredCreds, browserLogin };
+/**
+ * 사용자 실브라우저에서 복사한 로그인 쿠키를 계정 프로필에 주입한다(캡차 없는 프론트 방식).
+ */
+async function importCookies(platformKey, account, raw) {
+  const def = MEDIA_PLATFORMS[platformKey];
+  if (!def) throw new Error(`알 수 없는 플랫폼: ${platformKey}`);
+  if (def.publish.mode !== 'browser' || !BROWSER_PUBLISHERS[platformKey]) {
+    throw new Error(`${def.name}은(는) 쿠키 로그인 대상 플랫폼이 아닙니다.`);
+  }
+  const mod = BROWSER_PUBLISHERS[platformKey]();
+  if (!mod.importCookies) throw new Error(`${def.name} 쿠키 로그인은 아직 지원되지 않습니다.`);
+  return mod.importCookies(account, raw);
+}
+
+module.exports = { publish, hasRequiredCreds, browserLogin, importCookies };

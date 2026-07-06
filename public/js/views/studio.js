@@ -346,11 +346,13 @@ function renderVariantCard(v, { showContent = false } = {}) {
         ${v.status === 'manual' ? `
           <button class="btn btn-sm btn-good act-retry" data-id="${v.id}">🔄 자동 발행 재시도</button>
           ${BROWSER_PLATFORMS.includes(v.platform) ? `<button class="btn btn-sm act-login" data-acc="${v.media_account_id}" data-name="${esc(v.account_name || '')}">🔐 직접 로그인</button>` : ''}
+          ${v.platform === 'naver_blog' ? `<button class="btn btn-sm act-cookie" data-acc="${v.media_account_id}" data-name="${esc(v.account_name || '')}">🍪 쿠키로 로그인</button>` : ''}
           <button class="btn btn-sm btn-primary act-copy" data-id="${v.id}">📋 원고 복사</button>
           <button class="btn btn-sm btn-good act-mark" data-id="${v.id}">발행 완료로 표시</button>` : ''}
         ${v.status === 'failed' ? `
           <button class="btn btn-sm act-retry" data-id="${v.id}">🔄 재시도</button>
-          ${BROWSER_PLATFORMS.includes(v.platform) ? `<button class="btn btn-sm act-login" data-acc="${v.media_account_id}" data-name="${esc(v.account_name || '')}">🔐 직접 로그인</button>` : ''}` : ''}
+          ${BROWSER_PLATFORMS.includes(v.platform) ? `<button class="btn btn-sm act-login" data-acc="${v.media_account_id}" data-name="${esc(v.account_name || '')}">🔐 직접 로그인</button>` : ''}
+          ${v.platform === 'naver_blog' ? `<button class="btn btn-sm act-cookie" data-acc="${v.media_account_id}" data-name="${esc(v.account_name || '')}">🍪 쿠키로 로그인</button>` : ''}` : ''}
         ${v.status === 'published' && v.published_url ? `<a class="btn btn-sm" href="${esc(v.published_url)}" target="_blank" rel="noopener">발행 링크 ↗</a>` : ''}
         ${extra.notes ? `<span style="font-size:11.5px; color:var(--muted)">💡 ${esc(extra.notes)}</span>` : ''}
       </div>
@@ -400,13 +402,39 @@ function bindVariantActions(el, refresh) {
   el.querySelectorAll('.act-login').forEach((b) => b.addEventListener('click', async () => {
     const orig = b.textContent;
     b.disabled = true; b.textContent = '로그인 창 열림…';
-    toast(`'${b.dataset.name || '계정'}' 로그인 창이 열립니다. 아이디·비밀번호·캡차를 직접 입력해 로그인을 끝내면 세션이 자동 저장됩니다(최대 3분).`, 'info');
+    toast(`'${b.dataset.name || '계정'}' 로그인 창이 서버 PC에 열립니다(실제 크롬 프로필). 아이디·비밀번호·캡차를 직접 입력해 로그인을 끝내면 세션이 자동 저장됩니다(최대 4분).`, 'info');
     try {
       const r = await API.post(`/api/accounts/${b.dataset.acc}/browser-login`);
       toast(r.already ? '이미 로그인된 상태입니다. 바로 재시도하세요.' : '로그인 세션이 저장되었습니다. "자동 발행 재시도"를 눌러 발행하세요.', 'good');
     } catch (e) {
-      toast(`로그인 실패: ${e.message}`, 'bad');
+      toast(`로그인 실패: ${e.message} — 창이 안 뜨거나 캡차가 계속되면 "쿠키로 로그인"을 사용하세요.`, 'bad');
     } finally { b.disabled = false; b.textContent = orig; }
+  }));
+  el.querySelectorAll('.act-cookie').forEach((b) => b.addEventListener('click', () => {
+    openModal({
+      title: '🍪 쿠키로 로그인 (캡차 없음)',
+      body: `
+        <div style="font-size:12.5px; line-height:1.7; color:var(--muted); margin-bottom:10px">
+          평소 쓰는 브라우저에서 <b style="color:var(--text)">네이버에 정상 로그인</b>한 뒤, 로그인 쿠키만 복사해 붙여넣으면 이 계정으로 발행합니다. 자동화 브라우저가 아니라 캡차가 뜨지 않습니다.<br><br>
+          <b style="color:var(--text)">복사 방법</b><br>
+          ① 네이버 로그인 상태에서 <b>F12</b> → <b>Application</b>(애플리케이션) 탭<br>
+          ② 왼쪽 <b>Cookies</b> → <b>https://www.naver.com</b> 선택<br>
+          ③ <b>NID_AUT</b>, <b>NID_SES</b> 행의 <b>Value</b>를 각각 복사해 아래에 붙여넣기
+        </div>
+        <div class="field"><label>NID_AUT (필수)</label><input id="ck-auth" placeholder="예: abcd1234..." /></div>
+        <div class="field"><label>NID_SES (권장)</label><input id="ck-ses" placeholder="예: efgh5678..." /></div>`,
+      footer: `<button class="btn" data-close>취소</button><button class="btn btn-good" id="ck-ok">세션 저장</button>`,
+    });
+    document.getElementById('ck-ok').addEventListener('click', async () => {
+      const NID_AUT = document.getElementById('ck-auth').value.trim();
+      const NID_SES = document.getElementById('ck-ses').value.trim();
+      if (!NID_AUT) { toast('NID_AUT 값을 입력하세요.', 'bad'); return; }
+      try {
+        await API.post(`/api/accounts/${b.dataset.acc}/import-cookies`, { cookies: { NID_AUT, NID_SES } });
+        closeModal();
+        toast('쿠키 세션이 저장되었습니다. "자동 발행 재시도"를 눌러 발행하세요.', 'good');
+      } catch (e) { toast(`쿠키 저장 실패: ${e.message}`, 'bad'); }
+    });
   }));
   el.querySelectorAll('.act-reject').forEach((b) => b.addEventListener('click', async () => {
     await API.post(`/api/variants/${b.dataset.id}/reject`); toast('반려되었습니다.'); refresh();

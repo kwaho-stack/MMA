@@ -442,6 +442,15 @@ app.post('/api/accounts/:id/browser-login', wrap(async (req, res) => {
   res.json({ ok: true, ...result });
 }));
 
+app.post('/api/accounts/:id/import-cookies', wrap(async (req, res) => {
+  // 사용자 실브라우저에서 복사한 로그인 쿠키를 계정 프로필에 주입한다(캡차 없는 프론트 방식).
+  const account = db.prepare('SELECT * FROM media_accounts WHERE id = ?').get(req.params.id);
+  if (!account) throw new Error('계정을 찾을 수 없습니다.');
+  const result = await adapters.importCookies(account.platform, account, req.body.cookies || req.body || {});
+  log('publish', `쿠키 로그인 주입 완료 — ${account.name} (${result.count}개)`, { accountId: account.id });
+  res.json({ ok: true, ...result });
+}));
+
 // ---------- 수익 ----------
 app.get('/api/revenues', wrap(async (req, res) => {
   const days = Number(req.query.days || 30);

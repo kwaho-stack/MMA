@@ -136,6 +136,24 @@ async function browserLogin(account) {
 }
 
 /**
+ * 사용자가 평소 쓰는 브라우저에서 네이버에 정상 로그인한 뒤, 개발자도구에서 복사한
+ * 로그인 쿠키(NID_AUT / NID_SES)를 계정 프로필에 주입한다 — 자동화 캡차가 아예 없는 방식.
+ */
+async function importCookies(account, raw = {}) {
+  const authVal = String(raw.NID_AUT || raw.nid_aut || '').trim();
+  const sesVal = String(raw.NID_SES || raw.nid_ses || '').trim();
+  if (!authVal) {
+    throw new Error('NID_AUT 쿠키 값이 필요합니다. 네이버에 로그인한 브라우저에서 F12 → Application(애플리케이션) → Cookies → https://www.naver.com → NID_AUT 값을 복사해 붙여넣으세요.');
+  }
+  // 만료 시각을 명시해야 프로필에 영구 저장된다(미지정 시 세션 쿠키로 취급돼 재실행 시 사라짐).
+  const expires = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30; // 30일
+  const mk = (name, value) => ({ name, value, domain: '.naver.com', path: '/', httpOnly: true, secure: true, sameSite: 'Lax', expires });
+  const cookies = [mk('NID_AUT', authVal)];
+  if (sesVal) cookies.push(mk('NID_SES', sesVal));
+  return browser.setCookies(account, cookies);
+}
+
+/**
  * 발행 실행.
  * @returns {Promise<{url: string}>}
  */
@@ -229,4 +247,4 @@ async function publish(account, variant) {
   });
 }
 
-module.exports = { publish, browserLogin };
+module.exports = { publish, browserLogin, importCookies };
