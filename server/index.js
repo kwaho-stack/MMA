@@ -4,6 +4,7 @@ const { db, getAllSettings, setSetting, getSetting, log, DEFAULT_SETTINGS } = re
 const { MEDIA_PLATFORMS, AD_PLATFORMS } = require('./catalog');
 const seed = require('./seed');
 const llm = require('./llm');
+const adapters = require('./adapters');
 const { runPipeline, publishVariant } = require('./pipeline');
 const revenueSync = require('./revenue-sync');
 const scheduler = require('./scheduler');
@@ -423,6 +424,22 @@ app.post('/api/variants/:id/mark-published', wrap(async (req, res) => {
   ).run(url, req.params.id);
   log('publish', `수동 발행 완료 처리 (variant #${req.params.id})`, { url });
   res.json({ ok: true });
+}));
+
+app.post('/api/variants/:id/retry', wrap(async (req, res) => {
+  // 수동/실패로 넘어간 발행을 다시 자동 발행 시도한다(직접 로그인 후 재시도용).
+  const result = await publishVariant(Number(req.params.id));
+  res.json(result);
+}));
+
+app.post('/api/accounts/:id/browser-login', wrap(async (req, res) => {
+  // 네이버·티스토리 등 브라우저 발행 플랫폼에서 사용자가 직접 로그인하도록
+  // 화면이 보이는 로그인 창을 띄운다. 캡차·2단계 인증은 사용자가 직접 통과한다.
+  const account = db.prepare('SELECT * FROM media_accounts WHERE id = ?').get(req.params.id);
+  if (!account) throw new Error('계정을 찾을 수 없습니다.');
+  const result = await adapters.browserLogin(account.platform, account);
+  log('publish', `브라우저 직접 로그인 ${result.already ? '확인(이미 로그인됨)' : '완료'} — ${account.name}`, { accountId: account.id });
+  res.json({ ok: true, ...result });
 }));
 
 // ---------- 수익 ----------

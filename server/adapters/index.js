@@ -257,4 +257,19 @@ async function publish(platformKey, account, variant) {
   return { mode: 'published', simulated: false, url };
 }
 
-module.exports = { publish, hasRequiredCreds };
+/**
+ * 브라우저 자동 발행 플랫폼(네이버·티스토리)에서 사용자가 직접 로그인하도록
+ * 화면이 보이는 로그인 창을 띄운다. 성공 시 세션이 저장돼 이후 자동 발행이 재사용한다.
+ */
+async function browserLogin(platformKey, account) {
+  const def = MEDIA_PLATFORMS[platformKey];
+  if (!def) throw new Error(`알 수 없는 플랫폼: ${platformKey}`);
+  if (def.publish.mode !== 'browser' || !BROWSER_PUBLISHERS[platformKey]) {
+    throw new Error(`${def.name}은(는) 브라우저 직접 로그인이 필요한 플랫폼이 아닙니다.`);
+  }
+  const mod = BROWSER_PUBLISHERS[platformKey]();
+  if (!mod.browserLogin) throw new Error(`${def.name} 직접 로그인은 아직 지원되지 않습니다.`);
+  return mod.browserLogin(account);
+}
+
+module.exports = { publish, hasRequiredCreds, browserLogin };

@@ -8,6 +8,16 @@ const copilot = require('./copilot');
 const gemini = require('./gemini');
 const guidelines = require('./guidelines');
 const aiTells = require('./ai-tells');
+const { stripAiMarkup, CLICKBAIT_TITLE } = require('./format');
+
+/** 생성 결과에서 AI 티(마크다운 기호)를 걷어낸다 — 제목·본문·캡션 공통 후처리. */
+function cleanContent(o) {
+  if (!o) return o;
+  if (o.title) o.title = stripAiMarkup(o.title).trim();
+  if (o.body) o.body = stripAiMarkup(o.body);
+  if (o.caption) o.caption = stripAiMarkup(o.caption);
+  return o;
+}
 
 const PROVIDER_ORDER = ['anthropic', 'copilot', 'google'];
 
@@ -228,8 +238,10 @@ async function generateMaster(topic, category, { stages = false } = {}) {
     `다룰 관점: ${topic.angle || '-'}`,
     `카테고리: ${category ? category.name : '-'}`,
     '',
+    CLICKBAIT_TITLE,
+    '',
     '위 주제로 마스터 원고를 작성하세요.',
-    '- body는 마크다운, 소제목(##) 4~6개, 전체 2000자 이상',
+    '- body는 소제목(짧은 제목 줄) 4~6개로 나누되, #·##·**·__ 같은 마크다운 기호는 절대 쓰지 말 것(소제목은 그냥 짧은 문장 줄로). 전체 2000자 이상',
     '- summary는 2문장 요약',
     '- tags는 관련 태그 8~12개',
   ].join('\n');
@@ -275,12 +287,13 @@ async function generateMaster(topic, category, { stages = false } = {}) {
   }
 
   if (result) {
+    cleanContent(result);
     if (stages) result._stages = stageInfo;
     return result;
   }
 
   // 데모 폴백
-  return {
+  return cleanContent({
     title: `[데모] ${topic.title}`,
     summary: `${topic.title}에 대한 데모 원고입니다. Anthropic API 키를 등록하면 실제 원고가 생성됩니다.`,
     body: [
@@ -301,7 +314,7 @@ async function generateMaster(topic, category, { stages = false } = {}) {
     ].join('\n'),
     tags: (topic.keywords || '데모').split(',').map((s) => s.trim()).filter(Boolean),
     _demo: true,
-  };
+  });
 }
 
 // ---------- 플랫폼별 리라이팅 ----------
@@ -459,8 +472,12 @@ async function rewriteForPlatform(master, platformKey, platformDef, account, { a
     ...adDirectives(platformDef.kind, ads),
     '',
     '위 프로파일에 맞춰 리라이팅하세요.',
+    '',
+    CLICKBAIT_TITLE,
+    '- 본문에는 #·##·**·__ 같은 마크다운 기호를 쓰지 마세요(소제목은 짧은 문장 줄로).',
+    '',
     isBlog ? '- 본문 중간에 어울리는 삽화 위치를 [이미지: 장면을 구체적으로 묘사] 형식으로 2~3곳 표시하세요(이미지가 자동 생성되어 삽입됩니다).' : '',
-    '- title: 이 플랫폼용 제목(원본 제목과 다르게)',
+    '- title: 이 플랫폼용 제목(원본 제목과 다르게, 위 어그로 지침을 반드시 적용)',
     '- body: 본문(형식이 cards면 카드별로 "=== 카드 N ===" 구분, thread면 "=== 포스트 N ===" 구분, script면 장면 지시 포함 대본)',
     '- hashtags: SNS/숏폼이면 맥락에 맞는 해시태그(SNS는 3~5개만), 블로그면 태그 목록',
     '- caption: SNS용 캡션(블로그면 메타 설명 1~2문장)',
@@ -485,7 +502,7 @@ async function rewriteForPlatform(master, platformKey, platformDef, account, { a
     }
     // 지침 체크리스트 유도 정제 — 저가 모델이 지침을 하나씩 따라 자가 점검·수정하게 한다.
     result = await guidedRefine(result, { system, masterBlock, platformDef, profile: p });
-    return result;
+    return cleanContent(result);
   }
 
   // 데모 폴백 — 프로파일 구조만 흉내낸 자리표시 원고

@@ -5,7 +5,8 @@
 //       → [이미지: …] 마커 위치에 생성 이미지 파일 업로드 → 발행 버튼 → 게시 URL 회수
 // 캡차·2단계 인증이 뜨면 자동화를 중단하고 명확한 안내와 함께 수동 발행으로 전환된다.
 
-const { withAccountPage, clickFirst } = require('../browser');
+const browser = require('../browser');
+const { withAccountPage, clickFirst, openLoginWindow } = browser;
 const images = require('../images');
 
 function credsOf(account) {
@@ -80,6 +81,61 @@ async function insertImage(page, frame, filePath) {
 }
 
 /**
+ * 한 줄을 네이버 스마트에디터 인용구(quotation) 컴포넌트로 삽입한다.
+ * 에디터 버전에 따라 툴바 셀렉터가 달라 여러 후보를 시도하고, 버튼을 못 찾으면
+ * 인용부호로 감싼 일반 문단으로 폴백한다(발행 자체는 막지 않는다).
+ */
+async function insertQuote(page, frame, text) {
+  const opened = await clickFirst(frame, [
+    'button[data-name="quotation"]',
+    'button[data-log="fnt.quot"]',
+    '.se-toolbar-item-quotation button',
+    'button[aria-label*="인용"]',
+    'button.se-toolbar-button-quotation',
+    'button:has-text("인용구")',
+  ], { optional: true, timeout: 1500 });
+  if (opened) {
+    // 인용구 스타일 서브메뉴가 뜨면 첫 스타일을 고른다(없으면 무시).
+    await clickFirst(frame, [
+      '.se-toolbar-option-quotation button',
+      '.se-quotation-type-option button',
+      '.se-toolbar-submenu button',
+    ], { optional: true, timeout: 800 });
+    await page.keyboard.type(text, { delay: 6 });
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter'); // 인용구 블록에서 빠져나와 일반 문단으로 복귀
+    return true;
+  }
+  // 폴백: 인용부호로 감싼 문단
+  await page.keyboard.type(`“${text}”`, { delay: 6 });
+  await page.keyboard.press('Enter');
+  return false;
+}
+
+/**
+ * 사용자가 직접 로그인할 수 있도록 화면이 보이는(headful) 네이버 로그인 창을 띄운다.
+ * 아이디/비밀번호가 등록돼 있으면 미리 채워 넣고, 캡차·2단계 인증은 사용자가 직접 처리한다.
+ * NID_AUT 쿠키가 확인되면 로그인 성공으로 보고 세션을 저장한다(이후 자동 발행이 이 세션을 재사용).
+ */
+async function browserLogin(account) {
+  const creds = credsOf(account);
+  return openLoginWindow(account, {
+    startUrl: 'https://nid.naver.com/nidlogin.login?mode=form',
+    prefill: async (page) => {
+      if (!creds.naver_id && !creds.naver_pw) return;
+      await page.evaluate(({ id, pw }) => {
+        const set = (sel, v) => {
+          const el = document.querySelector(sel);
+          if (el && v) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); }
+        };
+        set('#id', id); set('#pw', pw);
+      }, { id: creds.naver_id || '', pw: creds.naver_pw || '' });
+    },
+    isDone: async (ctx) => (await ctx.cookies()).some((c) => c.name === 'NID_AUT'),
+  });
+}
+
+/**
  * 발행 실행.
  * @returns {Promise<{url: string}>}
  */
@@ -122,11 +178,18 @@ async function publish(account, variant) {
         }
         continue;
       }
-      const text = segments[i].trim();
-      if (!text) continue;
-      for (const line of text.split('\n')) {
-        if (line.trim()) await page.keyboard.type(line, { delay: 4 });
-        await page.keyboard.press('Enter');
+      const text = segments[i];
+      if (!text.trim()) continue;
+      for (const rawLine of text.split('\n')) {
+        const line = rawLine.trim();
+        if (!line) { await page.keyboard.press('Enter'); continue; }
+        const quote = line.match(/^>\s?(.+)$/); // "> 인용문" → 인용구 컴포넌트
+        if (quote) {
+          await insertQuote(page, frame, quote[1].trim());
+        } else {
+          await page.keyboard.type(line, { delay: 4 });
+          await page.keyboard.press('Enter');
+        }
       }
     }
 
@@ -166,4 +229,4 @@ async function publish(account, variant) {
   });
 }
 
-module.exports = { publish };
+module.exports = { publish, browserLogin };

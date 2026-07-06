@@ -344,9 +344,13 @@ function renderVariantCard(v, { showContent = false } = {}) {
           <button class="btn btn-sm btn-danger act-reject" data-id="${v.id}">반려</button>` : ''}
         ${v.status === 'scheduled' ? `<button class="btn btn-sm btn-good act-approve" data-id="${v.id}">지금 발행</button>` : ''}
         ${v.status === 'manual' ? `
+          <button class="btn btn-sm btn-good act-retry" data-id="${v.id}">🔄 자동 발행 재시도</button>
+          ${BROWSER_PLATFORMS.includes(v.platform) ? `<button class="btn btn-sm act-login" data-acc="${v.media_account_id}" data-name="${esc(v.account_name || '')}">🔐 직접 로그인</button>` : ''}
           <button class="btn btn-sm btn-primary act-copy" data-id="${v.id}">📋 원고 복사</button>
           <button class="btn btn-sm btn-good act-mark" data-id="${v.id}">발행 완료로 표시</button>` : ''}
-        ${v.status === 'failed' ? `<button class="btn btn-sm act-approve" data-id="${v.id}">재시도</button>` : ''}
+        ${v.status === 'failed' ? `
+          <button class="btn btn-sm act-retry" data-id="${v.id}">🔄 재시도</button>
+          ${BROWSER_PLATFORMS.includes(v.platform) ? `<button class="btn btn-sm act-login" data-acc="${v.media_account_id}" data-name="${esc(v.account_name || '')}">🔐 직접 로그인</button>` : ''}` : ''}
         ${v.status === 'published' && v.published_url ? `<a class="btn btn-sm" href="${esc(v.published_url)}" target="_blank" rel="noopener">발행 링크 ↗</a>` : ''}
         ${extra.notes ? `<span style="font-size:11.5px; color:var(--muted)">💡 ${esc(extra.notes)}</span>` : ''}
       </div>
@@ -358,6 +362,9 @@ const PLATFORM_NAMES = {
   instagram: '인스타그램', facebook: '페이스북', threads: '스레드', x_twitter: 'X(트위터)',
   tiktok: '틱톡', youtube: '유튜브',
 };
+
+// 브라우저 자동 발행(로그인 세션 필요) 플랫폼 — "직접 로그인" 버튼 노출 대상.
+const BROWSER_PLATFORMS = ['naver_blog', 'tistory'];
 
 function bindVariantActions(el, refresh) {
   el.querySelectorAll('.act-copy-text').forEach((b) => b.addEventListener('click', async () => {
@@ -378,6 +385,28 @@ function bindVariantActions(el, refresh) {
       else if (r.deferred) toast('일일 발행 상한 도달 — 내일로 예약되었습니다.', 'info');
       refresh();
     } catch (e) { toast(e.message, 'bad'); refresh(); }
+  }));
+  el.querySelectorAll('.act-retry').forEach((b) => b.addEventListener('click', async () => {
+    const orig = b.textContent;
+    b.disabled = true; b.textContent = '재시도 중…';
+    try {
+      const r = await API.post(`/api/variants/${b.dataset.id}/retry`);
+      if (r.published) toast(`발행 완료${r.simulated ? ' (시뮬레이션)' : ''}`, 'good');
+      else if (r.manual) toast(`여전히 자동 발행 불가: ${r.reason}`, 'info');
+      else if (r.deferred) toast('일일 발행 상한 도달 — 내일로 예약되었습니다.', 'info');
+      refresh();
+    } catch (e) { toast(e.message, 'bad'); b.disabled = false; b.textContent = orig; }
+  }));
+  el.querySelectorAll('.act-login').forEach((b) => b.addEventListener('click', async () => {
+    const orig = b.textContent;
+    b.disabled = true; b.textContent = '로그인 창 열림…';
+    toast(`'${b.dataset.name || '계정'}' 로그인 창이 열립니다. 아이디·비밀번호·캡차를 직접 입력해 로그인을 끝내면 세션이 자동 저장됩니다(최대 3분).`, 'info');
+    try {
+      const r = await API.post(`/api/accounts/${b.dataset.acc}/browser-login`);
+      toast(r.already ? '이미 로그인된 상태입니다. 바로 재시도하세요.' : '로그인 세션이 저장되었습니다. "자동 발행 재시도"를 눌러 발행하세요.', 'good');
+    } catch (e) {
+      toast(`로그인 실패: ${e.message}`, 'bad');
+    } finally { b.disabled = false; b.textContent = orig; }
   }));
   el.querySelectorAll('.act-reject').forEach((b) => b.addEventListener('click', async () => {
     await API.post(`/api/variants/${b.dataset.id}/reject`); toast('반려되었습니다.'); refresh();

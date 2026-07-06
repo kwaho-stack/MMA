@@ -6,11 +6,31 @@
 //       → 발행 레이어에서 공개 발행 → 게시 URL 회수
 // 2단계 인증이 뜨면 자동화를 중단하고 안내와 함께 수동 발행으로 전환된다.
 
-const { withAccountPage, clickFirst } = require('../browser');
+const { withAccountPage, clickFirst, openLoginWindow } = require('../browser');
 const images = require('../images');
 
 function credsOf(account) {
   try { return JSON.parse(account.credentials || '{}'); } catch { return {}; }
+}
+
+/**
+ * 사용자가 직접 로그인할 수 있도록 화면이 보이는(headful) 카카오 로그인 창을 띄운다.
+ * 2단계 인증·캡차는 사용자가 직접 처리하고, TSSESSION 쿠키가 확인되면 세션을 저장한다.
+ */
+async function browserLogin(account) {
+  const creds = credsOf(account);
+  return openLoginWindow(account, {
+    startUrl: 'https://www.tistory.com/auth/login',
+    prefill: async (page) => {
+      // 카카오 로그인 버튼까지만 눌러 로그인 폼을 띄운다(자격증명 입력은 사용자가).
+      await clickFirst(page, ['.btn_login.link_kakao_id', 'a:has-text("카카오계정으로 로그인")', '.link_kakao_id'], { optional: true, timeout: 3000 });
+      await page.waitForTimeout(1200);
+      if (creds.kakao_email) {
+        await page.locator('input[name="loginId"], input[type="email"]').first().fill(creds.kakao_email).catch(() => {});
+      }
+    },
+    isDone: async (ctx) => (await ctx.cookies()).some((c) => c.name === 'TSSESSION'),
+  });
 }
 
 async function isLoggedIn(page) {
@@ -157,4 +177,4 @@ async function publish(account, variant) {
   });
 }
 
-module.exports = { publish };
+module.exports = { publish, browserLogin };
