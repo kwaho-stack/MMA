@@ -120,6 +120,48 @@ async function viewSettings(el) {
         <div><b style="font-size:13px;">AI 느낌 제거 (자기비평 2단 생성)</b>
         <div class="hint">마스터 원고 초안을 AI 느낌 점수로 자동 점검하고, 높으면 구체성·리듬을 살려 한 번 더 고쳐 씁니다. 원고당 토큰이 약 2배 들지만 사람 냄새가 확 올라갑니다. 끄면 초안 1회로 끝냅니다.</div></div>
       </div>
+
+      <details class="adv" open style="margin:6px 0 14px;">
+        <summary>💰 비용 최적화 <span class="sum-hint" id="cost-badge"></span></summary>
+        <div class="adv-body">
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
+            <button class="btn btn-sm" type="button" data-preset="quality">최고 품질</button>
+            <button class="btn btn-sm" type="button" data-preset="balanced">균형 (권장)</button>
+            <button class="btn btn-sm" type="button" data-preset="budget">최대 절약</button>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label>리라이팅 모델 <span style="font-weight:400; color:var(--muted)">(대량 발행분)</span></label>
+              <select id="model-rewrite">
+                <option value="" ${!s.llm_model_rewrite ? 'selected' : ''}>마스터와 동일</option>
+                ${['claude-haiku-4-5', 'claude-sonnet-5', 'claude-opus-4-8'].map((m) => `<option value="${m}" ${s.llm_model_rewrite === m ? 'selected' : ''}>${m}${m === 'claude-haiku-4-5' ? ' (최저가 · 권장)' : m === 'claude-sonnet-5' ? ' (중간)' : ' (고품질)'}</option>`).join('')}
+              </select>
+              <div class="hint">리라이팅은 마스터 원고를 각색하는 작업이라 저가 모델로도 충분합니다. Haiku는 Opus 대비 출력비 1/5.</div>
+            </div>
+            <div class="field">
+              <label>사고 깊이 (effort)</label>
+              <select id="effort">
+                ${[['low', '낮음 (최저 비용)'], ['medium', '중간 (권장)'], ['high', '높음 (고품질·고비용)']].map(([v, t]) => `<option value="${v}" ${s.llm_effort === v ? 'selected' : ''}>${t}</option>`).join('')}
+              </select>
+              <div class="hint">사고(thinking) 토큰량을 조절. 낮출수록 출력비가 줄어듭니다. Haiku 등 미지원 모델엔 자동 미적용.</div>
+            </div>
+          </div>
+          <div class="field" style="display:flex; align-items:center; gap:10px;">
+            <label class="switch"><input type="checkbox" id="cache" ${s.prompt_cache !== '0' ? 'checked' : ''} /><span class="track"></span></label>
+            <div><b style="font-size:13px;">프롬프트 캐싱</b>
+            <div class="hint">한 콘텐츠를 여러 플랫폼으로 리라이팅할 때 공유되는 시스템·마스터 원고를 캐시 재사용해 입력비를 ~90% 절감합니다. 끌 이유가 거의 없습니다.</div></div>
+          </div>
+          <div class="field" style="margin-bottom:0;">
+            <label>지침 유도 정제 <span style="font-weight:400; color:var(--muted)">(저가 모델 품질 보강)</span></label>
+            <select id="guided">
+              ${[['auto', '자동 — 저가 모델일 때만 (권장)'], ['on', '항상 켬'], ['off', '끔 (최저 비용)']].map(([v, t]) => `<option value="${v}" ${(s.guided_refine || 'auto') === v ? 'selected' : ''}>${t}</option>`).join('')}
+            </select>
+            <div class="hint">초안을 <b>플랫폼 지침 체크리스트대로 하나씩 점검·수정</b>하는 단계. 저가 모델이 한 번에 못 지키는 지침을 따라가며 품질을 끌어올립니다(리라이팅 1회 추가).</div>
+          </div>
+          <div id="cost-box" class="cost-box"></div>
+        </div>
+      </details>
+
       <div class="field-row" style="margin-bottom:0;">
         <div class="field" style="margin-bottom:0;">
           <label>GitHub Copilot ${s.copilot?.connected ? `<span class="badge badge-ok">연결됨${s.copilot.user ? ` — @${esc(s.copilot.user)}` : ''}</span>` : '<span class="badge badge-warn">미연결</span>'}</label>
@@ -231,6 +273,82 @@ async function viewSettings(el) {
     el.querySelectorAll('.mode-card').forEach((c) => c.classList.toggle('selected', c === card));
   }));
 
+  // ---- 비용 최적화: 프리셋 + 실시간 예상 비용 ----
+  const PRICE = { 'claude-opus-4-8': [5, 25], 'claude-opus-4-7': [5, 25], 'claude-opus-4-6': [5, 25], 'claude-sonnet-5': [3, 15], 'claude-sonnet-4-6': [3, 15], 'claude-haiku-4-5': [1, 5] };
+  const supportsThink = (m) => /^claude-(opus-4-(6|7|8)|sonnet-(5|4-6)|fable-5)/.test(m || '');
+  const thinkOut = (m, effort) => (supportsThink(m) ? ({ low: 800, medium: 1500, high: 3000 }[effort] || 1500) : 0);
+  const PLATFORMS = 6; // 예시 기준: 한 주제를 6개 채널로 발행
+  const RATE = Number(s.usd_krw_rate || 1380);
+
+  function readCfg() {
+    const master = el.querySelector('#model').value;
+    const rwSel = el.querySelector('#model-rewrite').value;
+    return {
+      master,
+      rewrite: rwSel || master,
+      effort: el.querySelector('#effort').value,
+      critique: el.querySelector('#deai').checked,
+      refineMode: el.querySelector('#guided').value,
+      cache: el.querySelector('#cache').checked,
+    };
+  }
+
+  function estimate(c) {
+    const pM = PRICE[c.master] || [5, 25];
+    const pR = PRICE[c.rewrite] || [5, 25];
+    const refine = c.refineMode === 'on' || (c.refineMode === 'auto' && !supportsThink(c.rewrite));
+    const call = (inT, outT, price, m) => (inT * price[0] + (outT + thinkOut(m, c.effort)) * price[1]) / 1e6;
+    let usd = call(2700, 4000, pM, c.master);
+    if (c.critique) usd += call(7000, 4000, pM, c.master);
+    const shared = c.cache ? 4300 * 0.9 : 0;
+    for (let i = 0; i < PLATFORMS; i++) {
+      usd += call(i === 0 ? 6600 : 6600 - shared, 3000, pR, c.rewrite);
+      if (refine) usd += call(c.cache ? 800 : 5000, 3000, pR, c.rewrite);
+    }
+    return { usd, krw: Math.round(usd * RATE), refine };
+  }
+
+  function renderCost() {
+    if (!el.querySelector('#cost-box')) return;
+    const c = readCfg();
+    const e = estimate(c);
+    const per100 = Math.round(e.krw * 100);
+    const badge = el.querySelector('#cost-badge');
+    if (badge) badge.textContent = `콘텐츠 1건당 약 ${e.krw.toLocaleString()}원`;
+    el.querySelector('#cost-box').innerHTML = `
+      <div class="cost-head">예상 비용 <span style="font-weight:400; color:var(--muted)">· 주제 1건을 ${PLATFORMS}개 채널로 발행 기준 (추정)</span></div>
+      <div class="cost-figures">
+        <div class="cost-fig"><div class="cf-num">${e.krw.toLocaleString()}<span>원</span></div><div class="cf-lbl">콘텐츠 1건</div></div>
+        <div class="cost-fig"><div class="cf-num">${per100.toLocaleString()}<span>원</span></div><div class="cf-lbl">월 100건</div></div>
+        <div class="cost-fig"><div class="cf-num" style="color:var(--muted)">$${e.usd.toFixed(3)}</div><div class="cf-lbl">1건 (USD)</div></div>
+      </div>
+      <div class="cost-note">마스터 <b>${c.master.replace('claude-', '')}</b> · 리라이팅 <b>${c.rewrite.replace('claude-', '')}</b>
+        · effort ${c.effort} · 캐싱 ${c.cache ? 'ON' : 'off'} · 유도정제 ${e.refine ? 'ON' : 'off'} · 자기비평 ${c.critique ? 'ON' : 'off'}
+        <br>이미지·카드뉴스(Gemini)는 별도. 한국어 토큰·사고량 변동으로 ±30% 오차 가능.</div>`;
+  }
+
+  const PRESETS = {
+    quality: { model: 'claude-opus-4-8', 'model-rewrite': 'claude-opus-4-8', effort: 'high', deai: true, cache: true, guided: 'off' },
+    balanced: { model: 'claude-opus-4-8', 'model-rewrite': 'claude-haiku-4-5', effort: 'medium', deai: true, cache: true, guided: 'auto' },
+    budget: { model: 'claude-haiku-4-5', 'model-rewrite': 'claude-haiku-4-5', effort: 'low', deai: false, cache: true, guided: 'on' },
+  };
+  el.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => {
+    const p = PRESETS[b.dataset.preset];
+    if (!p) return;
+    for (const [id, val] of Object.entries(p)) {
+      const node = el.querySelector('#' + id);
+      if (!node) continue;
+      if (node.type === 'checkbox') node.checked = val; else node.value = val;
+    }
+    toast(`${b.textContent} 프리셋 적용 — 저장을 눌러 반영하세요`, 'info');
+    renderCost();
+  }));
+  ['#model', '#model-rewrite', '#effort', '#deai', '#cache', '#guided'].forEach((sel) => {
+    const node = el.querySelector(sel);
+    if (node) node.addEventListener('change', renderCost);
+  });
+  renderCost();
+
   el.querySelector('#save').addEventListener('click', async () => {
     try {
       await API.put('/api/settings', {
@@ -243,6 +361,10 @@ async function viewSettings(el) {
         anthropic_api_key: el.querySelector('#api-key').value.trim(),
         llm_model: el.querySelector('#model').value,
         deai_selfcritique: el.querySelector('#deai').checked ? '1' : '0',
+        llm_model_rewrite: el.querySelector('#model-rewrite').value,
+        llm_effort: el.querySelector('#effort').value,
+        prompt_cache: el.querySelector('#cache').checked ? '1' : '0',
+        guided_refine: el.querySelector('#guided').value,
         llm_provider: el.querySelector('#llm-provider').value,
         copilot_model: el.querySelector('#copilot-model').value.trim() || 'gpt-4o',
         google_client_id: el.querySelector('#g-client-id').value.trim(),

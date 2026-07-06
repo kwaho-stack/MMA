@@ -21,6 +21,38 @@ function model() {
   return getSetting('llm_model') || 'claude-opus-4-8';
 }
 
+/** 단계별 모델 — 리라이팅은 저가 모델을 따로 지정할 수 있다(비용 절감). */
+function modelFor(stage) {
+  if (stage === 'rewrite') {
+    const r = (getSetting('llm_model_rewrite') || '').trim();
+    if (r) return r;
+  }
+  return model();
+}
+
+// adaptive thinking + effort를 지원하는 모델(그 외 Haiku 등에 보내면 400).
+function supportsAdaptive(m) {
+  return /^claude-(opus-4-(6|7|8)|sonnet-(5|4-6)|fable-5)/.test(String(m || ''));
+}
+
+function effortLevel() {
+  const e = getSetting('llm_effort') || 'medium';
+  return ['low', 'medium', 'high', 'xhigh', 'max'].includes(e) ? e : 'medium';
+}
+
+/** 모델별로 안전한 thinking/effort 파라미터 — 지원 안 하는 모델에는 아무것도 싣지 않는다. */
+function anthropicTuning(m) {
+  if (supportsAdaptive(m)) return { thinking: { type: 'adaptive' }, effort: effortLevel() };
+  return {}; // Haiku 등: thinking·effort 미전송(비용도 절감)
+}
+
+/** 콘텐츠 블록 배열 또는 문자열 프롬프트를 문자열로 평탄화(copilot·gemini용). */
+function promptText(prompt) {
+  if (typeof prompt === 'string') return prompt;
+  if (Array.isArray(prompt)) return prompt.map((b) => b.text || '').join('\n\n');
+  return String(prompt || '');
+}
+
 function providerReady(p) {
   if (p === 'anthropic') return Boolean(getSetting('anthropic_api_key') || process.env.ANTHROPIC_API_KEY);
   if (p === 'copilot') return copilot.isConnected();
@@ -46,14 +78,14 @@ function parseJSONLoose(text) {
   return JSON.parse(t);
 }
 
-async function jsonRequest({ system, prompt, schema, maxTokens = 16000 }) {
+async function jsonRequest({ system, prompt, schema, maxTokens = 16000, stage = 'master', cache = false }) {
   const provider = activeProvider();
   if (!provider) return null;
 
   if (provider === 'copilot') {
     const raw = await copilot.chat({
       system: `${system}\n\n중요: 반드시 아래 JSON 스키마를 만족하는 JSON 객체 하나만 출력하세요. 설명·코드펜스·다른 텍스트를 붙이지 마세요.`,
-      prompt: `${prompt}\n\n[출력 JSON 스키마]\n${JSON.stringify(schema)}`,
+      prompt: `${promptText(prompt)}\n\n[출력 JSON 스키마]\n${JSON.stringify(schema)}`,
       maxTokens: Math.min(maxTokens, 8000),
     });
     return parseJSONLoose(raw);
@@ -63,7 +95,7 @@ async function jsonRequest({ system, prompt, schema, maxTokens = 16000 }) {
     const gmodel = getSetting('google_text_model') || 'gemini-2.5-flash';
     const data = await gemini.generateContent(gmodel, {
       systemInstruction: { parts: [{ text: `${system}\n\n반드시 아래 스키마를 만족하는 JSON 객체 하나만 출력하세요.\n${JSON.stringify(schema)}` }] },
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      contents: [{ role: 'user', parts: [{ text: promptText(prompt) }] }],
       generationConfig: { responseMimeType: 'application/json', temperature: 0.7, maxOutputTokens: Math.min(maxTokens, 8192) },
     });
     if (data.candidates?.[0]?.finishReason === 'SAFETY') {
@@ -72,15 +104,36 @@ async function jsonRequest({ system, prompt, schema, maxTokens = 16000 }) {
     return parseJSONLoose(gemini.textOf(data) || '{}');
   }
 
-  const client = getClient();
-  const response = await client.messages.create({
-    model: model(),
+  // ── Anthropic ──
+  const useModel = modelFor(stage);
+  const tuning = anthropicTuning(useModel);
+  const cacheOn = cache && getSetting('prompt_cache') !== '0';
+
+  // 시스템 프롬프트: 캐싱 시 캐시 제어 블록으로 감싼다(같은 실행의 여러 리라이팅이 재사용).
+  const systemParam = cacheOn
+    ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+    : system;
+
+  // 사용자 메시지: 배열이면 콘텐츠 블록으로, 캐싱 시 첫 블록(공유 마스터 원고)에 캐시 제어를 건다.
+  let content;
+  if (Array.isArray(prompt)) {
+    content = prompt.map((b, i) => (cacheOn && i === 0 ? { ...b, cache_control: { type: 'ephemeral' } } : b));
+  } else {
+    content = prompt;
+  }
+
+  const req = {
+    model: useModel,
     max_tokens: maxTokens,
-    thinking: { type: 'adaptive' },
-    system,
-    messages: [{ role: 'user', content: prompt }],
+    system: systemParam,
+    messages: [{ role: 'user', content }],
     output_config: { format: { type: 'json_schema', schema } },
-  });
+  };
+  if (tuning.thinking) req.thinking = tuning.thinking;
+  if (tuning.effort) req.output_config.effort = tuning.effort;
+
+  const client = getClient();
+  const response = await client.messages.create(req);
   if (response.stop_reason === 'refusal') {
     throw new Error('LLM이 요청을 거절했습니다. 주제를 바꿔 다시 시도하세요.');
   }
@@ -329,6 +382,53 @@ function adDirectives(kind, ads) {
   return lines;
 }
 
+/**
+ * 지침 체크리스트 유도 정제 — 초안을 플랫폼 지침 항목별로 자가 점검하고 고쳐 다시 쓰게 한다.
+ * 저가 모델이 한 번에 못 지키는 지침을 '하나씩 따라가며' 충족시키는 품질 보강 단계.
+ * guided_refine: 'auto'(저가 모델에서만·기본) | 'on'(항상) | 'off'
+ */
+async function guidedRefine(draft, { system, masterBlock, platformDef, profile }) {
+  if (!draft || draft._demo) return draft;
+  const mode = getSetting('guided_refine') || 'auto';
+  if (mode === 'off') return draft;
+  // auto: 상위 모델(사고 지원)은 한 방에 잘 쓰므로 생략, 저가 모델일 때만 정제(비용·품질 균형).
+  if (mode === 'auto' && supportsAdaptive(modelFor('rewrite'))) return draft;
+
+  const crit = aiTells.critiqueNotes(draft.body || '');
+  const aiNotes = crit.notes ? `\n[AI 느낌 신호 — 아래 표현을 삭제/교체]\n${crit.notes}` : '';
+  // 이미 충분히 사람 같고 지적할 게 없으면 정제 생략(불필요한 호출 방지).
+  if (crit.score < 22 && !aiNotes) return draft;
+
+  const instr = [
+    '아래는 당신이 방금 쓴 리라이팅 초안입니다. 발행 전에 지침을 항목별로 하나씩 점검하고 어긋난 곳을 고쳐 다시 쓰세요.',
+    '',
+    `[제목]\n${draft.title}`,
+    `[본문]\n${draft.body}`,
+    '',
+    '[지침 체크리스트 — 각 항목을 확인하고 충족하도록 수정]',
+    `- 구조: ${profile.structure}`,
+    `- 톤: ${profile.tone}`,
+    `- 전략·주의: ${profile.notes}`,
+    profile.extra ? `- 운영자 추가 지침: ${profile.extra}` : '',
+    aiNotes,
+    '',
+    '지시: 위 원본 원고의 사실·정보는 유지하되, 체크리스트를 모두 충족하도록 제목·본문·부가 항목(hashtags·caption·cta·pinned_comment·ad_snippet·notes)을 다시 완성하세요.',
+  ].filter(Boolean).join('\n');
+
+  try {
+    const refined = await jsonRequest({
+      system,
+      prompt: [{ type: 'text', text: masterBlock }, { type: 'text', text: instr }],
+      schema: REWRITE_SCHEMA, stage: 'rewrite', cache: true,
+    });
+    // AI 느낌이 더 나빠지지 않았을 때만 채택.
+    if (refined && refined.body && aiTells.score(refined.body).score <= crit.score + 5) {
+      return hardTrim(refined, platformDef, profile);
+    }
+  } catch { /* 정제 실패는 무시 — 초안 사용 */ }
+  return draft;
+}
+
 async function rewriteForPlatform(master, platformKey, platformDef, account, { ads = [] } = {}) {
   // 지침 탭에서 수정한 프로파일이 있으면 그것을 사용한다.
   const p = guidelines.profileFor(platformKey) || platformDef.rewriteProfile;
@@ -343,11 +443,10 @@ async function rewriteForPlatform(master, platformKey, platformDef, account, { a
     '- 광고·수익 문구는 콘텐츠 맥락에 자연스럽게 녹인다. 판매 압박 문구 금지.',
   ].join('\n');
 
-  const buildPrompt = (retryNote) => [
-    `[원본 원고]`,
-    `제목: ${master.title}`,
-    `본문:\n${master.body}`,
-    '',
+  // 공유 블록(마스터 원고) — 한 콘텐츠의 여러 플랫폼 리라이팅이 동일하므로 프롬프트 캐싱으로 재사용한다.
+  const masterBlock = [`[원본 원고]`, `제목: ${master.title}`, `본문:\n${master.body}`].join('\n');
+
+  const buildInstr = (retryNote) => [
     `[타깃 플랫폼] ${platformDef.name} (계정: ${account.name})`,
     `- 형식: ${p.format}`,
     `- 톤: ${p.tone}`,
@@ -372,15 +471,20 @@ async function rewriteForPlatform(master, platformKey, platformDef, account, { a
     retryNote ? `\n[재요청] ${retryNote}` : '',
   ].filter(Boolean).join('\n');
 
-  let result = await jsonRequest({ system, prompt: buildPrompt(null), schema: REWRITE_SCHEMA });
+  // 캐시 가능한 공유 블록을 앞에, 플랫폼별 지시를 뒤에 둔다(첫 블록이 캐시 프리픽스).
+  const buildPrompt = (retryNote) => [{ type: 'text', text: masterBlock }, { type: 'text', text: buildInstr(retryNote) }];
+
+  let result = await jsonRequest({ system, prompt: buildPrompt(null), schema: REWRITE_SCHEMA, stage: 'rewrite', cache: true });
 
   if (result) {
     // SNS 글자수 하드리밋: 위반 시 1회 재요청 → 그래도 초과하면 잘라내기(발행 실패 방지)
     const violation = limitViolation(result, platformDef, p);
     if (violation) {
-      const retried = await jsonRequest({ system, prompt: buildPrompt(violation), schema: REWRITE_SCHEMA });
+      const retried = await jsonRequest({ system, prompt: buildPrompt(violation), schema: REWRITE_SCHEMA, stage: 'rewrite', cache: true });
       result = hardTrim(retried || result, platformDef, p);
     }
+    // 지침 체크리스트 유도 정제 — 저가 모델이 지침을 하나씩 따라 자가 점검·수정하게 한다.
+    result = await guidedRefine(result, { system, masterBlock, platformDef, profile: p });
     return result;
   }
 
@@ -406,9 +510,13 @@ function hasApiKey() {
 /** 사이드바·설정 표시용 엔진 정보 */
 function engineInfo() {
   const provider = activeProvider();
-  const label = provider === 'copilot' ? `Copilot (${getSetting('copilot_model') || 'gpt-4o'})`
-    : provider === 'google' ? `Gemini (${getSetting('google_text_model') || 'gemini-2.5-flash'})`
-    : provider === 'anthropic' ? `Claude (${model()})` : '데모 모드';
+  let label;
+  if (provider === 'copilot') label = `Copilot (${getSetting('copilot_model') || 'gpt-4o'})`;
+  else if (provider === 'google') label = `Gemini (${getSetting('google_text_model') || 'gemini-2.5-flash'})`;
+  else if (provider === 'anthropic') {
+    const rw = modelFor('rewrite');
+    label = rw !== model() ? `Claude (${model()} · 리라이팅 ${rw})` : `Claude (${model()})`;
+  } else label = '데모 모드';
   return { ready: provider !== null, provider, label };
 }
 

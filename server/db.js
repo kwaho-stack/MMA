@@ -160,6 +160,11 @@ const DEFAULT_SETTINGS = {
   public_base_url: '',              // 이 서버의 외부 공개 URL — 인스타 API 업로드·외부 이미지 참조에 필요
   default_image_url: '',            // 인스타그램 전역 대체 이미지 URL — 카드뉴스 자동 업로드 실패 시 단일 게시에 사용
   deai_selfcritique: '1',           // 마스터 원고 자기비평 2단 생성(AI 느낌 제거) on/off — 끄면 토큰 절약
+  // ── 비용 최적화 ──
+  llm_model_rewrite: 'claude-haiku-4-5', // 리라이팅 전용 모델(비우면 llm_model 사용) — 기본 저가 모델로 대량 리라이팅 비용 절감
+  llm_effort: 'medium',             // 사고(thinking) 깊이 low|medium|high — 낮을수록 출력 토큰·비용 절감 (지원 모델만)
+  prompt_cache: '1',                // 프롬프트 캐싱 — 리라이팅 시 공유 시스템·마스터 원고를 캐시 재사용해 입력비 절감
+  guided_refine: 'auto',            // 지침 체크리스트 유도 정제 auto(저가 모델만)|on|off — 저가 모델 품질 보강
 };
 
 function getSetting(key) {
