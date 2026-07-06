@@ -134,6 +134,8 @@ async function openAccountContext(account, { headless = true } = {}) {
 
 /**
  * 미디어 계정의 영구 프로필로 페이지를 연다. 세션(쿠키·로컬스토리지)은 프로필에 자동 저장된다.
+ * 종료 직전, 네이버 등이 발행 때마다 교체(rotate)하는 세션 쿠키에 만료 시각을 부여해 유지한다
+ * — 그래야 한 번 로그인으로 세션이 계속 살아 있고, 매번 쿠키를 다시 넣지 않아도 된다.
  */
 async function withAccountPage(account, fn, { headless = true } = {}) {
   const ctx = await openAccountContext(account, { headless });
@@ -141,6 +143,7 @@ async function withAccountPage(account, fn, { headless = true } = {}) {
   try {
     return await fn(page, ctx);
   } finally {
+    await persistSessionCookies(ctx);
     await ctx.close().catch(() => { /* 프로필은 종료 시 자동 저장됨 */ });
   }
 }
