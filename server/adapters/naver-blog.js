@@ -156,6 +156,57 @@ async function importCookies(account, raw = {}) {
 }
 
 /**
+ * 편집 프레임·상단 페이지·모든 하위 프레임을 훑어 버튼을 찾아 클릭한다.
+ * 스마트에디터는 버전마다 버튼 위치(프레임)와 클래스(해시)가 달라, 넓게 탐색해야 안정적이다.
+ * @returns {Promise<string>} 클릭에 성공한 셀렉터
+ */
+async function clickAcross(page, frame, selectors, { timeout = 8000, label = '버튼' } = {}) {
+  const scopes = [];
+  const seen = new Set();
+  for (const s of [frame, page, ...page.frames()]) {
+    if (s && !seen.has(s)) { seen.add(s); scopes.push(s); }
+  }
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    for (const scope of scopes) {
+      for (const sel of selectors) {
+        try {
+          const loc = scope.locator(sel).first();
+          if (await loc.count()) {
+            await loc.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
+            await loc.click({ timeout: 1500 });
+            return sel;
+          }
+        } catch { /* 다음 후보/스코프 */ }
+      }
+    }
+    await page.waitForTimeout(400);
+  }
+  throw new Error(`${label}을(를) 찾지 못했습니다(에디터 UI가 바뀌었을 수 있음). 원고 복사로 수동 발행하거나, 발행 큐에서 다시 시도하세요.`);
+}
+
+// 발행 버튼 후보 — 해시 클래스가 바뀌어도 살아남도록 data속성·클래스 부분일치·텍스트·aria를 함께 시도.
+const PUBLISH_OPEN_SELECTORS = [
+  'button[data-testid="seOnePublishBtn"]',
+  'button[data-click-area="tpb.publish"]',
+  '[class*="publish_btn"]',
+  'button[class*="publish"]',
+  'button[aria-label*="발행"]',
+  'button:has-text("발행")',
+  'a:has-text("발행")',
+  '[role="button"]:has-text("발행")',
+];
+const PUBLISH_CONFIRM_SELECTORS = [
+  'button[data-testid="seOnePublishConfirmBtn"]',
+  '[data-click-area^="tpb"]',
+  '[class*="confirm_btn"]',
+  '[class*="btn_ok"]',
+  '.layer_btn_area button:has-text("발행")',
+  'button:has-text("발행")',
+  '[role="button"]:has-text("발행")',
+];
+
+/**
  * 발행 실행.
  * @returns {Promise<{url: string}>}
  */
@@ -213,13 +264,9 @@ async function publish(account, variant) {
       }
     }
 
-    // 태그 입력은 발행 레이어에서 — 발행 버튼(1차)
-    await clickFirst(frame, [
-      'button[data-testid="seOnePublishBtn"]',
-      '.publish_btn__apDcM',
-      'button:has-text("발행")',
-    ]);
-    await page.waitForTimeout(1000);
+    // 태그 입력은 발행 레이어에서 — 발행 버튼(1차, 발행 설정 레이어 열기)
+    await clickAcross(page, frame, PUBLISH_OPEN_SELECTORS, { label: '발행 버튼' });
+    await page.waitForTimeout(1200);
 
     // 태그 (해시태그 앞 5개)
     const tags = (extra.hashtags || []).slice(0, 5);
@@ -233,12 +280,8 @@ async function publish(account, variant) {
       }
     }
 
-    // 발행 확정(2차)
-    await clickFirst(frame, [
-      'button[data-testid="seOnePublishConfirmBtn"]',
-      '.confirm_btn__WEaBq',
-      'button:has-text("발행")',
-    ]);
+    // 발행 확정(2차, 레이어의 최종 발행 버튼)
+    await clickAcross(page, frame, PUBLISH_CONFIRM_SELECTORS, { label: '발행 확정 버튼' });
 
     // 게시 완료 → PostView로 이동
     await page.waitForURL(/blog\.naver\.com\/.+\/\d+|PostView/, { timeout: 30000 }).catch(() => {});
